@@ -47,8 +47,13 @@ def _make_tree(root: Path, *, manifest: bool = True) -> Path:
 # ── _select_tarball ───────────────────────────────────────────────
 
 def test_select_tarball_picks_arch_suffixed_x86_asset():
-    """GE-Proton11-4+ naming: the x86_64 build is the one we want."""
-    assert ge_installer._select_tarball(_ASSETS_NEW, "GE-Proton11-5") == "http://x/x86.tar.gz"
+    """GE-Proton11-4+ naming: the x86_64 build is the one we want on x86."""
+    assert ge_installer._select_tarball(_ASSETS_NEW, "GE-Proton11-5", arch="x86_64") == "http://x/x86.tar.gz"
+
+
+def test_select_tarball_picks_aarch64_asset_on_arm():
+    """On ARM hosts, the aarch64 asset is preferred."""
+    assert ge_installer._select_tarball(_ASSETS_NEW, "GE-Proton11-5", arch="aarch64") == "http://x/arm.tar.gz"
 
 
 def test_select_tarball_still_picks_legacy_bare_tag_asset():
@@ -57,7 +62,8 @@ def test_select_tarball_still_picks_legacy_bare_tag_asset():
         {"name": "GE-Proton11-3-aarch64.tar.gz", "browser_download_url": "http://x/arm.tar.gz"},
         {"name": "GE-Proton11-3.tar.gz", "browser_download_url": "http://x/x86.tar.gz"},
     ]
-    assert ge_installer._select_tarball(assets, "GE-Proton11-3") == "http://x/x86.tar.gz"
+    assert ge_installer._select_tarball(assets, "GE-Proton11-3", arch="x86_64") == "http://x/x86.tar.gz"
+    assert ge_installer._select_tarball(assets, "GE-Proton11-3", arch="aarch64") == "http://x/arm.tar.gz"
 
 
 def test_select_tarball_prefers_x86_over_an_unknown_arch():
@@ -66,7 +72,7 @@ def test_select_tarball_prefers_x86_over_an_unknown_arch():
         {"name": "GE-Proton12-1-riscv64.tar.gz", "browser_download_url": "http://x/riscv.tar.gz"},
         {"name": "GE-Proton12-1-x86_64.tar.gz", "browser_download_url": "http://x/x86.tar.gz"},
     ]
-    assert ge_installer._select_tarball(assets, None) == "http://x/x86.tar.gz"
+    assert ge_installer._select_tarball(assets, None, arch="x86_64") == "http://x/x86.tar.gz"
 
 
 def test_select_tarball_none_when_no_tarball():

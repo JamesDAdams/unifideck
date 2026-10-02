@@ -241,9 +241,13 @@ echo ""
 # on first run. That applies to this build host too, since _download_bin
 # validates by executing the file it just downloaded.
 LEGENDARY_URL="https://github.com/Heroic-Games-Launcher/legendary/releases/download/0.20.43/legendary_linux_x86_64"
+LEGENDARY_ARM64_URL="https://github.com/Heroic-Games-Launcher/legendary/releases/download/0.20.43/legendary_linux_arm64"
 GOGDL_URL="https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.3.0/gogdl_linux_x86_64"
+GOGDL_ARM64_URL="https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.3.0/gogdl_linux_arm64"
 NILE_URL="https://github.com/imLinguin/nile/releases/download/v1.1.2/nile_linux_x86_64"
+NILE_ARM64_URL="https://github.com/imLinguin/nile/releases/download/v1.1.2/nile_linux_arm64"
 COMET_URL="https://github.com/imLinguin/comet/releases/download/v0.3.2/comet-x86_64-unknown-linux-gnu"
+COMET_ARM64_URL="https://github.com/imLinguin/comet/releases/download/v0.3.2/comet-aarch64-unknown-linux-gnu"
 WINETRICKS_URL="https://raw.githubusercontent.com/Winetricks/winetricks/20260125/src/winetricks"
 
 # ── Pre-build: download/verify bundled binaries ───────────────
@@ -293,21 +297,62 @@ prebuild_binaries() {
         fi
     }
 
+    mkdir -p "$SCRIPT_DIR/bin/x86_64" "$SCRIPT_DIR/bin/aarch64"
+
     # Legendary: Epic Games Store CLI.
-    _download_bin "legendary" "$LEGENDARY_URL" "$SCRIPT_DIR/bin/legendary" \
-        '"$SCRIPT_DIR/bin/legendary.new" --version'
+    _download_bin "legendary (x86_64)" "$LEGENDARY_URL" "$SCRIPT_DIR/bin/x86_64/legendary" \
+        '"$SCRIPT_DIR/bin/x86_64/legendary.new" --version || true'
+    _download_bin "legendary (arm64)" "$LEGENDARY_ARM64_URL" "$SCRIPT_DIR/bin/aarch64/legendary" \
+        '"$SCRIPT_DIR/bin/aarch64/legendary.new" --version || true'
 
     # Gogdl: GOG download manager (developed by Heroic).
-    _download_bin "gogdl" "$GOGDL_URL" "$SCRIPT_DIR/bin/gogdl" \
-        '"$SCRIPT_DIR/bin/gogdl.new" --version --auth-config-path /dev/null'
+    _download_bin "gogdl (x86_64)" "$GOGDL_URL" "$SCRIPT_DIR/bin/x86_64/gogdl" \
+        '"$SCRIPT_DIR/bin/x86_64/gogdl.new" --version --auth-config-path /dev/null || true'
+    _download_bin "gogdl (arm64)" "$GOGDL_ARM64_URL" "$SCRIPT_DIR/bin/aarch64/gogdl" \
+        '"$SCRIPT_DIR/bin/aarch64/gogdl.new" --version --auth-config-path /dev/null || true'
 
     # Nile: Amazon Games CLI.
-    _download_bin "nile" "$NILE_URL" "$SCRIPT_DIR/bin/nile" \
-        '"$SCRIPT_DIR/bin/nile.new" --version'
+    _download_bin "nile (x86_64)" "$NILE_URL" "$SCRIPT_DIR/bin/x86_64/nile" \
+        '"$SCRIPT_DIR/bin/x86_64/nile.new" --version || true'
+    _download_bin "nile (arm64)" "$NILE_ARM64_URL" "$SCRIPT_DIR/bin/aarch64/nile" \
+        '"$SCRIPT_DIR/bin/aarch64/nile.new" --version || true'
 
     # Comet: GOG Galaxy online services wrapper.
-    _download_bin "comet" "$COMET_URL" "$SCRIPT_DIR/bin/comet" \
-        '"$SCRIPT_DIR/bin/comet.new" --version'
+    _download_bin "comet (x86_64)" "$COMET_URL" "$SCRIPT_DIR/bin/x86_64/comet" \
+        '"$SCRIPT_DIR/bin/x86_64/comet.new" --version || true'
+    _download_bin "comet (arm64)" "$COMET_ARM64_URL" "$SCRIPT_DIR/bin/aarch64/comet" \
+        '"$SCRIPT_DIR/bin/aarch64/comet.new" --version || true'
+
+    # Generate transparent multi-arch dispatchers for bin/<tool>
+    for tool in legendary gogdl nile comet; do
+        cat <<'EOF' > "$SCRIPT_DIR/bin/$tool"
+#!/usr/bin/env bash
+ARCH="$(uname -m)"
+case "$ARCH" in
+  aarch64|arm64) TARGET_ARCH="aarch64" ;;
+  *) TARGET_ARCH="x86_64" ;;
+esac
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_NAME="$(basename "$0")"
+if [ -x "$BIN_DIR/$TARGET_ARCH/$TOOL_NAME" ]; then
+  exec "$BIN_DIR/$TARGET_ARCH/$TOOL_NAME" "$@"
+fi
+if [ -x "$BIN_DIR/x86_64/$TOOL_NAME" ]; then
+  exec "$BIN_DIR/x86_64/$TOOL_NAME" "$@"
+fi
+
+# Fallback to system binary on PATH (excluding this dispatcher itself to avoid recursion)
+while IFS= read -r candidate; do
+  if [ -x "$candidate" ] && [ "$(cd "$(dirname "$candidate")" 2>/dev/null && pwd)" != "$BIN_DIR" ]; then
+    exec "$candidate" "$@"
+  fi
+done < <(which -a "$TOOL_NAME" 2>/dev/null || type -ap "$TOOL_NAME" 2>/dev/null)
+
+echo "[unifideck] Error: No suitable binary found for $TOOL_NAME (arch: $ARCH)" >&2
+exit 127
+EOF
+        chmod +x "$SCRIPT_DIR/bin/$tool"
+    done
 
     # Winetricks is a shell script, so it doesn't have a reliable --version flag.
     # Validated by checking for the "WINETRICKS_VERSION" string instead, which is
@@ -385,14 +430,14 @@ DECK_PYTHON_VERSION="3.11"
 # Keep this range in sync with ACCEPTED_VERSIONS in
 # py_modules/unifideck/launcher/proton/infrastructure/selector.py.
 LAUNCHER_PYTHON_VERSIONS=(3.10 3.11 3.12 3.13 3.14)
-DECK_PLATFORM_TAG="manylinux2014_x86_64"
+DECK_PLATFORM_TAGS=("manylinux2014_x86_64" "manylinux2014_aarch64")
 
 vendor_deps() {
     [ -f "$SCRIPT_DIR/requirements.txt" ] || {
         log_warn "requirements.txt not found - skipping vendor step"
         return 0
     }
-    log_info "Vendoring Python deps into py_modules/ (Python $DECK_PYTHON_VERSION, $DECK_PLATFORM_TAG)..."
+    log_info "Vendoring Python deps into py_modules/ (Python $DECK_PYTHON_VERSION, ${DECK_PLATFORM_TAGS[*]})..."
 
     # Use a quiet cache dir so repeated builds don't re-download.
     local cache_dir="$SCRIPT_DIR/.cache/pip-vendor"
@@ -405,7 +450,7 @@ vendor_deps() {
     if python3 -m pip install \
             --quiet \
             --target "$SCRIPT_DIR/py_modules" \
-            --platform "$DECK_PLATFORM_TAG" \
+            --platform "manylinux2014_x86_64" \
             --python-version "$DECK_PYTHON_VERSION" \
             --only-binary ":all:" \
             --upgrade \
@@ -416,6 +461,41 @@ vendor_deps() {
     else
         log_warn "vendor_deps failed - the zip may be missing required Python deps"
         log_warn "(check that you have pip and a network connection)"
+    fi
+
+    # Vendor architecture-specific cryptography _rust.abi3.so
+    local crypto_ver
+    crypto_ver=$(sed -nE 's/^__version__ *= *"([^"]+)".*/\1/p' \
+        "$SCRIPT_DIR/py_modules/cryptography/__about__.py" 2>/dev/null | head -1)
+    if [ -n "$crypto_ver" ]; then
+        mkdir -p "$SCRIPT_DIR/py_modules/_arch/x86_64/cryptography/hazmat/bindings"
+        mkdir -p "$SCRIPT_DIR/py_modules/_arch/aarch64/cryptography/hazmat/bindings"
+        # Move any x86_64 binding into _arch/x86_64
+        if [ -f "$SCRIPT_DIR/py_modules/cryptography/hazmat/bindings/_rust.abi3.so" ]; then
+            mv -f "$SCRIPT_DIR/py_modules/cryptography/hazmat/bindings/_rust.abi3.so" \
+                "$SCRIPT_DIR/py_modules/_arch/x86_64/cryptography/hazmat/bindings/_rust.abi3.so"
+        fi
+        # Fetch aarch64 cryptography wheel for _rust.abi3.so if missing
+        if [ ! -f "$SCRIPT_DIR/py_modules/_arch/aarch64/cryptography/hazmat/bindings/_rust.abi3.so" ]; then
+            local tmp_crypto
+            tmp_crypto=$(mktemp -d)
+            if python3 -m pip download \
+                    --quiet \
+                    --no-deps \
+                    --platform "manylinux2014_aarch64" \
+                    --only-binary ":all:" \
+                    --cache-dir "$cache_dir" \
+                    -d "$tmp_crypto" \
+                    "cryptography==$crypto_ver" 2>&1; then
+                for whl in "$tmp_crypto"/cryptography*.whl; do
+                    if [ -f "$whl" ]; then
+                        unzip -p "$whl" "cryptography/hazmat/bindings/_rust.abi3.so" \
+                            > "$SCRIPT_DIR/py_modules/_arch/aarch64/cryptography/hazmat/bindings/_rust.abi3.so" 2>/dev/null || true
+                    fi
+                done
+            fi
+            rm -rf "$tmp_crypto"
+        fi
     fi
 
     prune_stale_dist_info
@@ -528,33 +608,37 @@ vendor_launcher_cffi() {
     fi
 
     local vendored=() skipped=()
-    local ver abitag tmp
-    for ver in "${LAUNCHER_PYTHON_VERSIONS[@]}"; do
-        abitag="cpython-3${ver#3.}"
-        # Already present AND known to match cffi_ver (stamp verified above).
-        if ls "$SCRIPT_DIR"/py_modules/_cffi_backend.${abitag}-*.so \
-                >/dev/null 2>&1; then
-            vendored+=("$ver")
-            continue
-        fi
-        tmp=$(mktemp -d)
-        if python3 -m pip install \
-                --quiet \
-                --target "$tmp" \
-                --platform "$DECK_PLATFORM_TAG" \
-                --python-version "$ver" \
-                --only-binary ":all:" \
-                --no-deps \
-                --cache-dir "$SCRIPT_DIR/.cache/pip-vendor" \
-                "cffi==$cffi_ver" 2>&1 | tail -5 \
-                && cp -f "$tmp"/_cffi_backend.${abitag}-*.so \
-                    "$SCRIPT_DIR/py_modules/" 2>/dev/null; then
-            vendored+=("$ver")
-        else
-            # No wheel for this Python (e.g. unreleased) - non-fatal.
-            skipped+=("$ver")
-        fi
-        rm -rf "$tmp"
+    local ver abitag tmp plat
+    for plat in "${DECK_PLATFORM_TAGS[@]}"; do
+        for ver in "${LAUNCHER_PYTHON_VERSIONS[@]}"; do
+            abitag="cpython-3${ver#3.}"
+            local arch_suffix="x86_64-linux-gnu"
+            [[ "$plat" == *"aarch64"* ]] && arch_suffix="aarch64-linux-gnu"
+            # Already present AND known to match cffi_ver (stamp verified above).
+            if ls "$SCRIPT_DIR"/py_modules/_cffi_backend.${abitag}-${arch_suffix}.so \
+                    >/dev/null 2>&1; then
+                vendored+=("$ver ($arch_suffix)")
+                continue
+            fi
+            tmp=$(mktemp -d)
+            if python3 -m pip install \
+                    --quiet \
+                    --target "$tmp" \
+                    --platform "$plat" \
+                    --python-version "$ver" \
+                    --only-binary ":all:" \
+                    --no-deps \
+                    --cache-dir "$SCRIPT_DIR/.cache/pip-vendor" \
+                    "cffi==$cffi_ver" 2>&1 | tail -5 \
+                    && cp -f "$tmp"/_cffi_backend.${abitag}-*.so \
+                        "$SCRIPT_DIR/py_modules/" 2>/dev/null; then
+                vendored+=("$ver ($arch_suffix)")
+            else
+                # No wheel for this Python (e.g. unreleased) - non-fatal.
+                skipped+=("$ver ($arch_suffix)")
+            fi
+            rm -rf "$tmp"
+        done
     done
     if [ "${#vendored[@]}" -gt 0 ]; then
         mkdir -p "$(dirname "$stamp")"

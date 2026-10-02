@@ -53,6 +53,12 @@ DECKY_PLUGIN_RUNTIME_DIR = os.environ.get(
 )
 
 sys.path.insert(0, str(Path(DECKY_PLUGIN_DIR) / "py_modules"))
+import platform
+_machine = platform.machine().lower()
+_arch = "aarch64" if _machine in ("aarch64", "arm64", "armv7l", "armv8l") else "x86_64"
+_arch_path = Path(DECKY_PLUGIN_DIR) / "py_modules" / "_arch" / _arch
+if _arch_path.is_dir():
+    sys.path.insert(0, str(_arch_path))
 # ``py_modules/_vendor/`` holds vendored modules whose names would
 # shadow stdlib/library modules at the top of ``py_modules``.
 # Currently only ``typing_extensions.py`` lives there — mypy 1.10+

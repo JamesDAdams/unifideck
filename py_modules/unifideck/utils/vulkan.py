@@ -51,15 +51,18 @@ _ELFCLASS64 = 2
 _LIB_DIRS = (
     "/usr/lib32",
     "/usr/lib/i386-linux-gnu",
+    "/usr/lib/arm-linux-gnueabihf",
+    "/usr/lib/arm-linux-gnueabi",
     "/usr/lib",
     "/usr/lib64",
     "/usr/lib/x86_64-linux-gnu",
+    "/usr/lib/aarch64-linux-gnu",
 )
 
 # Last resort when a manifest's library cannot be resolved on disk. This is
 # the heuristic that caused the bug, kept only as a per-entry fallback so
 # hosts it *does* work on (SteamOS: ``radeon_icd.i686.json``) never regress.
-_NAME_HINTS_32 = ("i686", "i386", "32")
+_NAME_HINTS_32 = ("i686", "i386", "32", "armhf", "armv7")
 
 
 class Vulkan32(Enum):

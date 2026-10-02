@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # IN THE SAME COMMIT as the binary update. Keep old hashes out —
 # the allowlist exists to block unknown binaries, not to
 # grandfather past versions.
-_KNOWN_HASHES: dict[str, str] = {
+_KNOWN_HASHES: dict[str, str | tuple[str, ...]] = {
     # Populated per-release. Empty string means "no reference
     # hash declared yet" — verify_bundled_binary returns None in
     # that case so early development doesn't fail builds.
@@ -50,7 +50,11 @@ _KNOWN_HASHES: dict[str, str] = {
     # asserts the two agree, so a bump that updates only one side fails CI.
     # legendary 0.20.43
     "legendary": (
-        "2b82497051afd95670994146e6038d6e1c98a1c60c21949def668b52aef7d3f7"
+        "2b82497051afd95670994146e6038d6e1c98a1c60c21949def668b52aef7d3f7",
+        "d3daca4e814708bb19182524b847d5015c9d79cffd732fe4753b53b22800c7ac",
+    ),
+    "legendary_arm64": (
+        "d3daca4e814708bb19182524b847d5015c9d79cffd732fe4753b53b22800c7ac"
     ),
     # nile 1.1.2 — deliberately held back; 1.2.0 migrates auth to an
     # encrypted store and DELETES ~/.config/nile/user.json, which
@@ -58,11 +62,27 @@ _KNOWN_HASHES: dict[str, str] = {
     # available. Bumping it without that migration silently empties the
     # Amazon library for authenticated users.
     "nile": (
-        "3a8c080c864a5952a01d7661693c60727b34a355ae21e9eab2047096b606c1df"
+        "3a8c080c864a5952a01d7661693c60727b34a355ae21e9eab2047096b606c1df",
+        "ff8e2029de956ecc3847bc374b5caeeffe830971c54e36fef57b4c54032d2542",
+    ),
+    "nile_arm64": (
+        "ff8e2029de956ecc3847bc374b5caeeffe830971c54e36fef57b4c54032d2542"
     ),
     # gogdl 1.3.0
     "gogdl": (
-        "cba013d42767c808237c437335ab1d56f58405d07e8f37b3324d264ea5c49655"
+        "cba013d42767c808237c437335ab1d56f58405d07e8f37b3324d264ea5c49655",
+        "c49e1519146523ec94f33e2d21eedcc9a167004d7da218621e6d5fb84a7a0f4c",
+    ),
+    "gogdl_arm64": (
+        "c49e1519146523ec94f33e2d21eedcc9a167004d7da218621e6d5fb84a7a0f4c"
+    ),
+    # comet 0.3.2
+    "comet": (
+        "2d6694d544fd3155d90d540e70bc1be767a6b9fdda130275f2b79616ff14e843",
+        "c8cd850a03ba66c10bf620eee2735946ddf0b5969cd38cae02c6bede6d15c5b8",
+    ),
+    "comet_arm64": (
+        "c8cd850a03ba66c10bf620eee2735946ddf0b5969cd38cae02c6bede6d15c5b8"
     ),
 }
 
@@ -129,11 +149,12 @@ def verify_bundled_binary(
     if actual is None:
         return None
 
-    if actual != expected:
+    expected_hashes = (expected,) if isinstance(expected, str) else expected
+    if actual not in expected_hashes:
         logger.error(
             "[binary_signatures] SECURITY: %s hash mismatch at %s. "
-            "Expected %s, got %s. Refusing to trust this binary.",
-            tool_name, path, expected, actual,
+            "Expected one of %s, got %s. Refusing to trust this binary.",
+            tool_name, path, expected_hashes, actual,
         )
         return False
 

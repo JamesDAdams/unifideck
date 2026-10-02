@@ -35,11 +35,10 @@ class EpicCloudSaveStrategy(CloudSaveStrategy):
         # SIBLING of py_modules, so naive dirname-walking from this file
         # lands on py_modules and misses bin/, falling back to a bare
         # "legendary" that isn't on the launcher's PATH.
+        from unifideck.core.arch import resolve_bundled_binary_path
         from unifideck.core.paths import resolve_plugin_dir
         plugin_dir = str(resolve_plugin_dir(start=Path(__file__)))
-        self.legendary_bin = os.path.join(plugin_dir, "bin", "legendary")
-        if not os.path.exists(self.legendary_bin):
-            self.legendary_bin = "legendary"
+        self.legendary_bin = resolve_bundled_binary_path(plugin_dir, "legendary")
 
     def _get_account_id(self) -> str | None:
         """Return the logged-in Epic account id (legendary ``user.json``).

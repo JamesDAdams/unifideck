@@ -10,10 +10,13 @@ import asyncio
 import contextlib
 import fcntl
 import logging
+import os
+import platform
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from unifideck.core.arch import resolve_bundled_binary_path
 from unifideck.launcher.frontend_bridge import launcher_toast
 
 from .common import AUTH_CONFIG, REDIST_DIR, run_wine
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _gogdl_bin(plan: ProtonLaunchPlan) -> Path:
-    return plan.context.plugin_dir / "bin" / "gogdl"
+    return Path(resolve_bundled_binary_path(plan.context.plugin_dir, "gogdl"))
 
 
 def _missing_deps(all_deps: list[str]) -> list[str]:

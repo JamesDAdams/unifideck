@@ -43,6 +43,7 @@ py_modules/*
 # Build Output
 # ===========================================
 out/
+steamos-export/
 
 # ===========================================
 # Environment and Secrets

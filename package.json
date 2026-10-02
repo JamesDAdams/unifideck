@@ -92,7 +92,8 @@
       ],
       "cpu": [
         "current",
-        "x64"
+        "x64",
+        "arm64"
       ],
       "libc": [
         "current",
@@ -109,9 +110,19 @@
       "name": "legendary"
     },
     {
+      "sha256hash": "d3daca4e814708bb19182524b847d5015c9d79cffd732fe4753b53b22800c7ac",
+      "url": "https://github.com/Heroic-Games-Launcher/legendary/releases/download/0.20.43/legendary_linux_arm64",
+      "name": "legendary_arm64"
+    },
+    {
       "sha256hash": "cba013d42767c808237c437335ab1d56f58405d07e8f37b3324d264ea5c49655",
       "url": "https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.3.0/gogdl_linux_x86_64",
       "name": "gogdl"
+    },
+    {
+      "sha256hash": "c49e1519146523ec94f33e2d21eedcc9a167004d7da218621e6d5fb84a7a0f4c",
+      "url": "https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.3.0/gogdl_linux_arm64",
+      "name": "gogdl_arm64"
     },
     {
       "sha256hash": "431f82fc74000e6c864409f1d8fb495d696c03928808e3e8acffc45179312a7b",
@@ -124,9 +135,19 @@
       "name": "nile"
     },
     {
+      "sha256hash": "ff8e2029de956ecc3847bc374b5caeeffe830971c54e36fef57b4c54032d2542",
+      "url": "https://github.com/imLinguin/nile/releases/download/v1.1.2/nile_linux_arm64",
+      "name": "nile_arm64"
+    },
+    {
       "sha256hash": "2d6694d544fd3155d90d540e70bc1be767a6b9fdda130275f2b79616ff14e843",
       "url": "https://github.com/imLinguin/comet/releases/download/v0.3.2/comet-x86_64-unknown-linux-gnu",
       "name": "comet"
+    },
+    {
+      "sha256hash": "c8cd850a03ba66c10bf620eee2735946ddf0b5969cd38cae02c6bede6d15c5b8",
+      "url": "https://github.com/imLinguin/comet/releases/download/v0.3.2/comet-aarch64-unknown-linux-gnu",
+      "name": "comet_arm64"
     }
   ]
 }

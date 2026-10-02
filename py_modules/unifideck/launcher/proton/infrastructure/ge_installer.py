@@ -35,6 +35,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from unifideck.core.arch import get_arch_name
 from unifideck.launcher.proton.infrastructure.ge_install_lock import (
     install_lock,
 )
@@ -232,20 +233,31 @@ def is_proton_install_complete(proton_script: Path) -> bool:
     return True
 
 
-def _select_tarball(assets: list[dict[str, Any]], tag: str | None = None) -> str | None:
-    """Pick the GE-Proton x86_64 ``.tar.gz`` asset URL.
+def _select_tarball(
+    assets: list[dict[str, Any]],
+    tag: str | None = None,
+    arch: str | None = None,
+) -> str | None:
+    """Pick the GE-Proton asset URL matching host architecture (x86_64 or aarch64).
 
     GE's asset naming changed at GE-Proton11-4: the x86_64 build went from
     a bare ``<tag>.tar.gz`` to ``<tag>-x86_64.tar.gz``, alongside the
     aarch64 build that had already started shipping. Both spellings are
-    matched by exact name first, then by the ``-x86_64`` suffix.
-
-    The deny-list scan is kept last as a safety net, but it is only
-    correct while every non-x86 asset carries one of the arch markers it
-    knows about — a future ``riscv64``/``ppc64le`` build would slip
-    through it — so the positive matches deliberately run first.
+    matched by exact name first, then by the architecture suffix.
     """
+    if arch is None:
+        arch = get_arch_name()
+
     urls = {a.get("name", ""): a.get("browser_download_url") for a in assets}
+
+    if arch == "aarch64":
+        if tag:
+            for expected in (f"{tag}-aarch64.tar.gz", f"{tag}-arm64.tar.gz"):
+                if urls.get(expected):
+                    return urls[expected]
+        for name, url in urls.items():
+            if name.endswith(("-aarch64.tar.gz", "-arm64.tar.gz")):
+                return url
 
     if tag:
         for expected in (f"{tag}-x86_64.tar.gz", f"{tag}.tar.gz"):

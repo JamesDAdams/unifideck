@@ -33,7 +33,12 @@ import pytest
 # Tools pinned in all three places. umu is deliberately absent: it is
 # committed to the repo rather than downloaded, so it has no remote_binary
 # entry and no URL in build-plugin.sh (its version lives in bin/umu/VERSION).
-_TRIPLE_PINNED = ("legendary", "gogdl", "nile")
+_TRIPLE_PINNED = (
+    "legendary", "legendary_arm64",
+    "gogdl", "gogdl_arm64",
+    "nile", "nile_arm64",
+    "comet", "comet_arm64",
+)
 
 
 def _repo_file(relative: str) -> Path | None:
@@ -114,13 +119,16 @@ def test_known_hashes_match_the_manifest(
     """
     from unifideck.core.binaries.binary_signatures import _KNOWN_HASHES
 
-    mismatched = {
-        name: (_KNOWN_HASHES[name], manifest[name]["sha256hash"])
-        for name in _TRIPLE_PINNED
-        if name in manifest
-        and _KNOWN_HASHES.get(name)  # "" means intentionally undeclared
-        and _KNOWN_HASHES[name] != manifest[name]["sha256hash"]
-    }
+    mismatched = {}
+    for name in _TRIPLE_PINNED:
+        if name in manifest and name in _KNOWN_HASHES:
+            known = _KNOWN_HASHES[name]
+            expected = manifest[name]["sha256hash"]
+            if isinstance(known, tuple):
+                if expected not in known:
+                    mismatched[name] = (f"one of {known}", expected)
+            elif known != expected:
+                mismatched[name] = (known, expected)
     assert not mismatched, (
         "binary_signatures._KNOWN_HASHES disagrees with package.json "
         "remote_binary — bump both in the same commit:\n"

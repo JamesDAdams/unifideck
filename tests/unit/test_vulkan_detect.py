@@ -26,8 +26,8 @@ def _icd(directory: Path, name: str, library: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     manifest = directory / name
     manifest.write_text(
-        '{"file_format_version": "1.0.0", "ICD": {"library_path": "%s", '
-        '"api_version": "1.3.0"}}' % library,
+        f'{{"file_format_version": "1.0.0", "ICD": {{"library_path": "{library}", '
+        f'"api_version": "1.3.0"}}}}',
         encoding="utf-8",
     )
     return manifest
@@ -77,6 +77,11 @@ def test_an_i686_filename_over_a_64bit_library_is_not_believed(
     _isolate(monkeypatch, tmp_path)
 
     assert vulkan.detect_32bit_vulkan().verdict is vulkan.Vulkan32.ABSENT
+
+
+def test_arm_lib_dirs_are_included() -> None:
+    assert "/usr/lib/aarch64-linux-gnu" in vulkan._LIB_DIRS
+    assert "/usr/lib/arm-linux-gnueabihf" in vulkan._LIB_DIRS
 
 
 def test_only_64bit_drivers_report_absent(

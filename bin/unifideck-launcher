@@ -197,6 +197,12 @@ def _bootstrap_path() -> None:
     plugin_dir = Path(__file__).resolve().parent.parent
     py_modules = plugin_dir / "py_modules"
     if py_modules.is_dir():
+        import platform
+        _machine = platform.machine().lower()
+        _arch = "aarch64" if _machine in ("aarch64", "arm64", "armv7l", "armv8l") else "x86_64"
+        _arch_path = py_modules / "_arch" / _arch
+        if _arch_path.is_dir():
+            sys.path.insert(0, str(_arch_path))
         sys.path.insert(0, str(py_modules))
 
 

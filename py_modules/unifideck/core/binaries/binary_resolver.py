@@ -25,6 +25,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from unifideck.core.arch import get_arch_name
 from unifideck.core.types.domain import CLITool
 
 from .binary_signatures import verify_bundled_binary
@@ -105,10 +106,24 @@ class BinaryResolver:
 
         """
         # Tier 1 — explicit search paths (bundled or hardcoded)
+        arch = get_arch_name()
+
         for candidate in tool.search_paths:
-            expanded = str(Path(candidate).expanduser())
+            cand_path = Path(candidate).expanduser()
+            # Prioritize architecture-specific subfolder (e.g. bin/aarch64/<name>)
+            arch_cand = cand_path.parent / arch / cand_path.name
+            if arch_cand.is_absolute() and _is_executable(str(arch_cand)):
+                expanded_arch = str(arch_cand)
+                logger.debug(
+                    "[BinaryResolver] %s found in arch search_paths: %s",
+                    tool.name, expanded_arch,
+                )
+                _log_signature_mismatch(tool.name, expanded_arch)
+                return expanded_arch
+
+            expanded = str(cand_path)
             if (
-                Path(expanded).is_absolute()
+                cand_path.is_absolute()
                 and _is_executable(expanded)
             ):
                 logger.debug(
