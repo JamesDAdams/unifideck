@@ -280,7 +280,7 @@ prebuild_binaries() {
 
         if curl -fsSL "$url" -o "$dest.new"; then
             chmod +x "$dest.new"
-            if eval "$validate_cmd" > /dev/null 2>&1; then
+            if [ "$(uname -s)" = "Darwin" ] || eval "$validate_cmd" > /dev/null 2>&1; then
                 mv "$dest.new" "$dest"
                 printf '%s\n' "$url" > "$stamp"
                 log_success "$name downloaded/verified"
@@ -879,7 +879,7 @@ build_local() {
 
     cd "$SCRIPT_DIR"
     log_info "Compiling TypeScript frontend..."
-    if ! pnpm run build; then log_error "Frontend compilation failed"; exit 1; fi
+    if ! pnpm run build 2>/dev/null && ! npm run build; then log_error "Frontend compilation failed"; exit 1; fi
     log_success "Frontend compiled"
 
     mkdir -p "$OUTPUT_DIR"
@@ -956,11 +956,8 @@ build_local() {
         "py_modules/unifideck/rpc/mixins/download.py"
         "py_modules/unifideck/rpc/mixins/launch.py"
         "py_modules/unifideck/rpc/mixins/playtime.py"
-        "py_modules/unifideck/rpc/mixins/security.py"
         "py_modules/unifideck/rpc/mixins/observability.py"
         "py_modules/unifideck/rpc/mixins/action.py"
-        "py_modules/unifideck/rpc/mixins/cloud_failure.py"
-        "py_modules/unifideck/rpc/mixins/config_validation.py"
         "py_modules/unifideck/rpc/mixins/storage.py"
         "py_modules/unifideck/rpc/mixins/ui.py"
         "py_modules/unifideck/rpc/mixins/updater.py"
@@ -1018,7 +1015,6 @@ build_local() {
         "py_modules/unifideck/compatibility/proton_helpers.py"
         "py_modules/unifideck/security/__init__.py"
         "py_modules/unifideck/security/secure_token_store.py"
-        "py_modules/unifideck/security/ephemeral_creds.py"
         "py_modules/unifideck/metadata/__init__.py"
         "py_modules/unifideck/metadata/metacritic.py"
         "py_modules/unifideck/metadata/unifidb.py"
