@@ -20,13 +20,15 @@ import contextlib
 import json
 import logging
 import os
-import platform
 import re
 import socket
 import time
 from pathlib import Path
 
-from unifideck.core.arch import resolve_bundled_binary_path
+from unifideck.core.arch import (
+    clean_mismatched_legendary_vendored_cache,
+    resolve_bundled_binary_path,
+)
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,10 @@ def resolve_legendary_bin(plugin_dir: Path) -> str:
 
     Bare ``legendary`` isn't on PATH in the launcher's scrubbed env, so
     prefer the plugin-bundled copy (an env override wins if set).
+    Also ensures any existing ~/.cache/legendary/vendored directory
+    matches host CPU architecture before legendary runs.
     """
+    clean_mismatched_legendary_vendored_cache()
     if os.environ.get("LEGENDARY_BIN"):
         return os.environ["LEGENDARY_BIN"]
     return resolve_bundled_binary_path(plugin_dir, "legendary")

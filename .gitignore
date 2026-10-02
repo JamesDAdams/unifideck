@@ -44,6 +44,7 @@ py_modules/*
 # ===========================================
 out/
 steamos-export/
+steamos-crash/
 
 # ===========================================
 # Environment and Secrets

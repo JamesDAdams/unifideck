@@ -75,6 +75,7 @@ Infrastructure primitives. No store or service knowledge.
 
 | Module/Package                  | Purpose                                   |
 | ------------------------------- | ----------------------------------------- |
+| `arch.py`                       | CPU architecture detection and path resolution |
 | `cache_manager.py`              | Namespace-keyed in-memory + disk cache    |
 | `manifest.py`                   | Plugin installation manifest reader       |
 | `metrics_collector.py`          | Latency/counter telemetry                 |

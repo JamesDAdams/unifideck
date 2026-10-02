@@ -496,6 +496,27 @@ vendor_deps() {
             fi
             rm -rf "$tmp_crypto"
         fi
+
+        # Patch cryptography.hazmat.bindings to include architecture-specific search path
+        cat <<'EOF' > "$SCRIPT_DIR/py_modules/cryptography/hazmat/bindings/__init__.py"
+# This file is dual licensed under the terms of the Apache License, Version
+# 2.0, and the BSD License. See the LICENSE file in the root of this repository
+# for complete details.
+
+from __future__ import annotations
+
+import os
+import platform
+from pathlib import Path
+
+_machine = platform.machine().lower()
+_arch = "aarch64" if _machine in ("aarch64", "arm64", "armv7l", "armv8l") else "x86_64"
+_arch_bindings = Path(__file__).resolve().parent.parent.parent.parent / "_arch" / _arch / "cryptography" / "hazmat" / "bindings"
+if _arch_bindings.is_dir():
+    _arch_str = str(_arch_bindings)
+    if _arch_str not in __path__:
+        __path__.append(_arch_str)
+EOF
     fi
 
     prune_stale_dist_info

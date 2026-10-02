@@ -5,7 +5,13 @@ import runpy
 from pathlib import Path
 from unittest.mock import patch
 
-from unifideck.core.arch import get_arch_name, is_arm, resolve_bundled_binary_path
+from unifideck.core.arch import (
+    clean_mismatched_legendary_vendored_cache,
+    get_arch_name,
+    get_elf_machine,
+    is_arm,
+    resolve_bundled_binary_path,
+)
 
 
 def test_arch_helpers() -> None:
@@ -84,3 +90,57 @@ def test_cryptography_bindings_path_resolution() -> None:
         runpy.run_path(str(init_file), init_globals={"__file__": str(init_file), "__path__": mock_path})
         expected_arch_dir = str(init_file.parent.parent.parent.parent / "_arch" / "aarch64" / "cryptography" / "hazmat" / "bindings")
         assert expected_arch_dir in mock_path
+
+
+def test_get_elf_machine(tmp_path: Path) -> None:
+    invalid_file = tmp_path / "not_elf.so"
+    invalid_file.write_bytes(b"not an elf file")
+    assert get_elf_machine(invalid_file) is None
+
+    nonexistent_file = tmp_path / "ghost.so"
+    assert get_elf_machine(nonexistent_file) is None
+
+    # Craft mock x86_64 and aarch64 ELF binaries
+    x86_elf = tmp_path / "x86.so"
+    # ELF magic (4 bytes) + 14 dummy bytes + 2 bytes e_machine (0x003e little endian)
+    x86_elf.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    assert get_elf_machine(x86_elf) == 0x3E
+
+    arm_elf = tmp_path / "arm.so"
+    # ELF magic (4 bytes) + 14 dummy bytes + 2 bytes e_machine (0x00b7 little endian)
+    arm_elf.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
+    assert get_elf_machine(arm_elf) == 0xB7
+
+
+def test_clean_mismatched_legendary_vendored_cache(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    vendored = cache_dir / "legendary" / "vendored"
+    so_dir = vendored / "Cryptodome" / "Util"
+    so_dir.mkdir(parents=True)
+    sample_so = so_dir / "_cpuid_c.abi3.so"
+
+    # 1. Non-existent cache dir returns False
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path / "empty")}):
+        assert clean_mismatched_legendary_vendored_cache() is False
+
+    # 2. On aarch64, if cache holds an x86_64 .so, it gets purged
+    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="aarch64"):
+        assert clean_mismatched_legendary_vendored_cache() is True
+        assert not vendored.exists()
+
+    # 3. On aarch64, if cache holds an aarch64 .so, it is retained
+    so_dir.mkdir(parents=True)
+    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="aarch64"):
+        assert clean_mismatched_legendary_vendored_cache() is False
+        assert vendored.exists()
+
+    # 4. On x86_64, if cache holds an aarch64 .so, it gets purged
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="x86_64"):
+        assert clean_mismatched_legendary_vendored_cache() is True
+        assert not vendored.exists()
+
