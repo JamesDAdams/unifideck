@@ -51,10 +51,10 @@ _KNOWN_HASHES: dict[str, str | tuple[str, ...]] = {
     # legendary 0.20.43
     "legendary": (
         "2b82497051afd95670994146e6038d6e1c98a1c60c21949def668b52aef7d3f7",
-        "d3daca4e814708bb19182524b847d5015c9d79cffd732fe4753b53b22800c7ac",
+        "e28d4bed5d7635e22093d62ed4686a4d66e9c1d8bc4f1b731f834cd16d43c86a",
     ),
     "legendary_arm64": (
-        "d3daca4e814708bb19182524b847d5015c9d79cffd732fe4753b53b22800c7ac"
+        "e28d4bed5d7635e22093d62ed4686a4d66e9c1d8bc4f1b731f834cd16d43c86a"
     ),
     # nile 1.1.2 — deliberately held back; 1.2.0 migrates auth to an
     # encrypted store and DELETES ~/.config/nile/user.json, which
@@ -63,10 +63,10 @@ _KNOWN_HASHES: dict[str, str | tuple[str, ...]] = {
     # Amazon library for authenticated users.
     "nile": (
         "3a8c080c864a5952a01d7661693c60727b34a355ae21e9eab2047096b606c1df",
-        "ff8e2029de956ecc3847bc374b5caeeffe830971c54e36fef57b4c54032d2542",
+        "f5ba63cfeb415ec1f07a980d6a2bbcdf8fc11411e5fa224f838a88fe78ad0008",
     ),
     "nile_arm64": (
-        "ff8e2029de956ecc3847bc374b5caeeffe830971c54e36fef57b4c54032d2542"
+        "f5ba63cfeb415ec1f07a980d6a2bbcdf8fc11411e5fa224f838a88fe78ad0008"
     ),
     # gogdl 1.3.0
     "gogdl": (

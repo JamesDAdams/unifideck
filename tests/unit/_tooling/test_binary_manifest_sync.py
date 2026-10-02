@@ -157,3 +157,77 @@ def test_bundled_umu_version_is_pinned() -> None:
     assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
         f"bin/umu/VERSION should hold a bare x.y.z version, got {version!r}"
     )
+
+
+def test_manifest_hashes_match_the_actual_binary_on_disk(
+    manifest: dict[str, dict[str, str]],
+) -> None:
+    """Each ``sha256hash`` matches the binary the build actually bundles.
+
+    The other tests in this module only cross-check the three *declared*
+    sources against each other. All three can agree with one another and
+    still be wrong: the ARM entries added for multi-arch support shipped
+    with hashes that matched no published asset, and ``prebuild_binaries()``
+    validation had been made non-fatal, so nothing caught it. Decky verifies
+    ``sha256hash`` at install time and aborts the whole plugin install on
+    mismatch, so a drifted hash ships a zip that installs nothing.
+
+    Only runs when the binaries are present in the checkout — they are
+    downloaded by ``prebuild_binaries()`` and are not committed.
+    """
+    import hashlib
+
+    bin_dir = _repo_file("bin")
+    if bin_dir is None:
+        pytest.skip("bin/ not found — run ./build-plugin.sh to populate binaries")
+
+    # remote_binary names are flat filenames; map each to the file that
+    # prebuild_binaries() actually writes for that architecture.
+    layout = {
+        "legendary": "legendary",
+        "legendary_arm64": "legendary",
+        "gogdl": "gogdl",
+        "gogdl_arm64": "gogdl",
+        "nile": "nile",
+        "nile_arm64": "nile",
+        "comet": "comet",
+        "comet_arm64": "comet",
+        "winetricks": "winetricks",
+    }
+
+    checked: list[str] = []
+    skipped: list[str] = []
+    drifted: dict[str, tuple[str, str]] = {}
+
+    for name, entry in sorted(manifest.items()):
+        tool = layout.get(name)
+        if tool is None:
+            skipped.append(f"{name} (no known on-disk layout)")
+            continue
+        subdir = "aarch64" if name.endswith("_arm64") else "x86_64"
+        candidates = (
+            [bin_dir / tool] if tool == "winetricks" else
+            [bin_dir / subdir / tool, bin_dir / tool]
+        )
+        actual_file = next((c for c in candidates if c.is_file()), None)
+        if actual_file is None:
+            skipped.append(f"{name} (binary not downloaded)")
+            continue
+        digest = hashlib.sha256(actual_file.read_bytes()).hexdigest()
+        if digest != entry["sha256hash"]:
+            drifted[name] = (entry["sha256hash"], digest)
+        else:
+            checked.append(name)
+
+    if not checked and not drifted:
+        pytest.skip("no bundled binaries present to verify")
+
+    assert not drifted, (
+        "package.json remote_binary sha256hash does not match the binary the "
+        "build bundles — Decky verifies this at install time and aborts the "
+        "whole plugin install on mismatch:\n"
+        + "\n".join(
+            f"  {n}:\n    manifest: {a}\n    on disk:  {b}"
+            for n, (a, b) in drifted.items()
+        )
+    )

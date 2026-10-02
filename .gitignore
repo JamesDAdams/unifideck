@@ -93,6 +93,12 @@ bin/nile
 bin/winetricks
 bin/comet
 
+# Per-architecture binaries, fetched by the same prebuild step. The
+# bin/<tool> shell dispatchers are generated alongside them, so the
+# whole arch-specific tree stays out of the repo.
+bin/x86_64/
+bin/aarch64/
+
 # Per-binary download stamps. Each holds the version-pinned URL the adjacent
 # binary came from, so a rebuild skips re-fetching ~28 MB it already has.
 bin/*.url
