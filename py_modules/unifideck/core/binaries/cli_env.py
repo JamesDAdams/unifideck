@@ -74,6 +74,9 @@ def clean_cli_env(
       A new dict — ``os.environ`` itself is never mutated, so this is safe
       to call from the long-lived backend process.
     """
+    from unifideck.core.arch import clean_all_mismatched_cli_vendored_caches
+
+    clean_all_mismatched_cli_vendored_caches()
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED_VARS}
     if overrides:
         env.update(overrides)

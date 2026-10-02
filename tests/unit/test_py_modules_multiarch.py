@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from unifideck.core.arch import (
+    clean_all_mismatched_cli_vendored_caches,
+    clean_mismatched_gogdl_vendored_cache,
     clean_mismatched_legendary_vendored_cache,
     get_arch_name,
     get_elf_machine,
@@ -143,4 +145,48 @@ def test_clean_mismatched_legendary_vendored_cache(tmp_path: Path) -> None:
          patch("platform.machine", return_value="x86_64"):
         assert clean_mismatched_legendary_vendored_cache() is True
         assert not vendored.exists()
+
+
+def test_clean_mismatched_gogdl_vendored_cache(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    vendored = cache_dir / "heroic_gogdl" / "vendored"
+    vendored.mkdir(parents=True)
+    sample_so = vendored / "gogdl_xdelta3.abi3.so"
+
+    # 1. Non-existent cache dir returns False
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path / "empty")}):
+        assert clean_mismatched_gogdl_vendored_cache() is False
+
+    # 2. On aarch64, if cache holds an x86_64 .so, it gets purged
+    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="aarch64"):
+        assert clean_mismatched_gogdl_vendored_cache() is True
+        assert not vendored.exists()
+
+    # 3. On aarch64, if cache holds an aarch64 .so, it is retained
+    vendored.mkdir(parents=True)
+    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="aarch64"):
+        assert clean_mismatched_gogdl_vendored_cache() is False
+        assert vendored.exists()
+
+
+def test_clean_all_mismatched_cli_vendored_caches(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    leg_vendored = cache_dir / "legendary" / "vendored" / "Cryptodome" / "Util"
+    gog_vendored = cache_dir / "heroic_gogdl" / "vendored"
+    leg_vendored.mkdir(parents=True)
+    gog_vendored.mkdir(parents=True)
+
+    (leg_vendored / "_cpuid_c.abi3.so").write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    (gog_vendored / "gogdl_xdelta3.abi3.so").write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("platform.machine", return_value="aarch64"):
+        clean_all_mismatched_cli_vendored_caches()
+        assert not (cache_dir / "legendary" / "vendored").exists()
+        assert not gog_vendored.exists()
+
 

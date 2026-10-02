@@ -91,3 +91,47 @@ def clean_mismatched_legendary_vendored_cache() -> bool:
 
     return False
 
+
+def clean_mismatched_gogdl_vendored_cache() -> bool:
+    """Purge ~/.cache/heroic_gogdl/vendored if compiled modules do not match current architecture."""
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_home).expanduser() if cache_home else Path("~/.cache").expanduser()
+    vendored_dir = base / "heroic_gogdl" / "vendored"
+
+    if not vendored_dir.is_dir():
+        return False
+
+    sample_so = vendored_dir / "gogdl_xdelta3.abi3.so"
+    if not sample_so.is_file():
+        so_files = list(vendored_dir.glob("**/*.so"))
+        if not so_files:
+            return False
+        sample_so = so_files[0]
+
+    machine = get_elf_machine(sample_so)
+    expected_machine = _ELF_MACHINE_AARCH64 if is_arm() else _ELF_MACHINE_X86_64
+
+    if machine != expected_machine:
+        logger.warning(
+            "[arch] gogdl vendored native cache arch mismatch "
+            "(found elf machine 0x%x, expected 0x%x). Purging %s",
+            machine or 0,
+            expected_machine,
+            vendored_dir,
+        )
+        try:
+            shutil.rmtree(vendored_dir, ignore_errors=True)
+            return True
+        except Exception:
+            logger.exception("[arch] Failed to purge mismatched gogdl vendored dir %s", vendored_dir)
+            return False
+
+    return False
+
+
+def clean_all_mismatched_cli_vendored_caches() -> None:
+    """Purge all known zipapp CLI vendored caches that mismatch host architecture."""
+    clean_mismatched_legendary_vendored_cache()
+    clean_mismatched_gogdl_vendored_cache()
+
+

@@ -65,10 +65,11 @@ _RECOVERABLE_CODES = {2, 74, 127}
 #
 # This became load-bearing with UD-126: Epic used to report legendary's exit
 # code (always 0, retries dead), and now reports the game's, like every other
-# store. Chosen generously — nothing legitimately spends two minutes failing
-# to bootstrap a runtime, and a game quit inside two minutes with exactly
-# rc 2/74/127 costs one harmless relaunch attempt.
-_RECOVERABLE_MAX_RUNTIME_SECONDS = 120
+# store. Chosen generously — a startup failure or runtime bootstrap crash
+# happens well within 30 seconds; past 30 seconds the process demonstrably
+# ran, so the code is the game's own exit status (or normal exit) and retrying
+# would relaunch a game the user just quit or that completed its run.
+_RECOVERABLE_MAX_RUNTIME_SECONDS = 30
 # Recoverable codes whose likely cause is a corrupt/incomplete steamrt
 # runtime bootstrap — the only ones that justify wiping the *shared*
 # runtime cache (hundreds of MB, re-downloaded on the next launch of
