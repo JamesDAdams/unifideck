@@ -263,7 +263,7 @@ class EdgeBrowser:
     # ── Controller permissions ───────────────────────────────────────
 
     @staticmethod
-    def ensure_controller_permissions() -> bool:
+    def ensure_controller_permissions(app_id: str | None = None) -> bool:
         """Delegate to EdgeInstaller.ensure_controller_permissions.
 
         Kept as a @staticmethod for API compatibility: callers that
@@ -272,7 +272,7 @@ class EdgeBrowser:
         """
         return EdgeInstaller(
             clean_env_fn=clean_env,
-        ).ensure_controller_permissions()
+        ).ensure_controller_permissions(app_id)
 
     # ── Detection & install (delegated to EdgeInstaller) ─────────────
 

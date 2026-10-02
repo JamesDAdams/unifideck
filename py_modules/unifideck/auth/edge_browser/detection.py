@@ -18,6 +18,7 @@ it's a series of subprocess probes.
 from __future__ import annotations
 
 import logging
+import platform
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -27,13 +28,54 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ARM_ARCHS = frozenset({"aarch64", "arm64", "armv7l", "armv8l"})
+_EDGE_FLATPAK_APP = "com.microsoft.Edge"
+_CHROMIUM_FLATPAK_APP = "org.chromium.Chromium"
+_FLATPAK_APPS = (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
+_NATIVE_BINS = (
+    "microsoft-edge",
+    "microsoft-edge-stable",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+)
 
-# Flatpak app identifiers. Only Microsoft Edge is supported because
-# it is the only browser that ships native xCloud gamepad + Steam
-# Deck controller support. Shared with installer.py.
-_FLATPAK_APPS = ("com.microsoft.Edge",)
-# Native binary names to search if no flatpak found (Edge only)
-_NATIVE_BINS = ("microsoft-edge", "microsoft-edge-stable")
+
+def is_arm() -> bool:
+    return platform.machine().lower() in _ARM_ARCHS
+
+
+def get_flatpak_apps() -> tuple[str, ...]:
+    if is_arm():
+        return (_CHROMIUM_FLATPAK_APP, _EDGE_FLATPAK_APP)
+    return (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
+
+
+def get_native_bins() -> tuple[str, ...]:
+    if is_arm():
+        return (
+            "chromium",
+            "chromium-browser",
+            "google-chrome",
+            "google-chrome-stable",
+            "microsoft-edge",
+            "microsoft-edge-stable",
+        )
+    return (
+        "microsoft-edge",
+        "microsoft-edge-stable",
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+    )
+
+
+def get_target_flatpak_app() -> str:
+    if is_arm():
+        return _CHROMIUM_FLATPAK_APP
+    return _EDGE_FLATPAK_APP
 
 
 def flatpak_remote_names(
@@ -84,11 +126,11 @@ def find_edge_cmd(
 
     """
     if shutil.which("flatpak"):
-        for app_id in _FLATPAK_APPS:
+        for app_id in get_flatpak_apps():
             cmd = _try_flatpak_app(app_id, clean_env_fn)
             if cmd is not None:
                 return cmd
-    for binary in _NATIVE_BINS:
+    for binary in get_native_bins():
         if shutil.which(binary):
             return [binary]
     return None

@@ -24,23 +24,31 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .detection import find_edge_cmd, flatpak_remote_names, is_edge_installed
+from .detection import (
+    _CHROMIUM_FLATPAK_APP,
+    _EDGE_FLATPAK_APP,
+    find_edge_cmd,
+    flatpak_remote_names,
+    get_target_flatpak_app,
+    is_edge_installed,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ────────────────────────────────────────────────────────
-# Flatpak app identifiers. Only Microsoft Edge is supported because it
-# is the only browser that ships native xCloud gamepad + Steam Deck
-# controller support.
-_FLATPAK_APPS = ("com.microsoft.Edge",)
-_EDGE_FLATPAK_APP = "com.microsoft.Edge"
+_FLATPAK_APPS = (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
 _FLATHUB_REMOTE = "flathub"
 _FLATHUB_REMOTE_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
-# Native binary names (kept re-exported for backward compat)
-_NATIVE_BINS = ("microsoft-edge", "microsoft-edge-stable")
+_NATIVE_BINS = (
+    "microsoft-edge",
+    "microsoft-edge-stable",
+    "chromium",
+    "chromium-browser",
+    "google-chrome",
+    "google-chrome-stable",
+)
 
 
 class EdgeInstaller:
@@ -73,44 +81,33 @@ class EdgeInstaller:
 
     # ── Permissions ──────────────────────────────────────────────────
 
-    def ensure_controller_permissions(self) -> bool:
-        """Grant Edge flatpak read access to ``/run/udev`` for controllers.
-
-        Edge's Gamepad API needs udev metadata (device names, vendor
-        IDs) to identify controllers. ``flatpak run --device=all``
-        only exposes ``/dev/*`` nodes; ``/run/udev`` requires a
-        separate filesystem override. This is the same step
-        Microsoft's official Steam Deck + xCloud guide recommends
-        users run manually::
-
-            flatpak --user override --filesystem=/run/udev:ro com.microsoft.Edge
-
-        Returns ``True`` if the override is already present or was
-        applied successfully, ``False`` on error.
-        """
+    def ensure_controller_permissions(self, app_id: str | None = None) -> bool:
         if not shutil.which("flatpak"):
             return False
+        target_app = app_id or get_target_flatpak_app()
         overrides_path = Path(
-            f"~/.local/share/flatpak/overrides/{_EDGE_FLATPAK_APP}",
+            f"~/.local/share/flatpak/overrides/{target_app}",
         ).expanduser()
         with contextlib.suppress(OSError):
             if overrides_path.is_file():
                 with overrides_path.open() as fh:
                     if "/run/udev" in fh.read():
                         logger.debug(
-                            "[Edge] Edge udev override already present",
+                            "[Edge] %s udev override already present",
+                            target_app,
                         )
                         return True
         logger.info(
             "[Edge] Applying flatpak /run/udev:ro override for "
-            "controller support",
+            "controller support on %s",
+            target_app,
         )
         try:
             proc = subprocess.run(
                 [
                     "flatpak", "--user", "override",
                     "--filesystem=/run/udev:ro",
-                    _EDGE_FLATPAK_APP,
+                    target_app,
                 ],
                 capture_output=True,
                 timeout=30,
@@ -118,19 +115,24 @@ class EdgeInstaller:
             )
             if proc.returncode == 0:
                 logger.info(
-                    "[Edge] Edge udev override applied successfully",
+                    "[Edge] %s udev override applied successfully",
+                    target_app,
                 )
                 return True
             stderr = proc.stderr.decode(
                 "utf-8", errors="replace",
             )[:200]
             logger.warning(
-                "[Edge] Edge udev override failed: %s", stderr,
+                "[Edge] %s udev override failed: %s",
+                target_app,
+                stderr,
             )
             return False
         except Exception as exc:
             logger.warning(
-                "[Edge] Edge udev override error: %s", exc,
+                "[Edge] %s udev override error: %s",
+                target_app,
+                exc,
             )
             return False
 
@@ -284,20 +286,21 @@ class EdgeInstaller:
             }
         # Snapshot current default browser before installing Edge
         original_browser = self._get_default_browser()
+        target_app = get_target_flatpak_app()
         logger.info(
-            "[Edge] Attempting to install Microsoft Edge via flatpak...",
+            "[Edge] Attempting to install %s via flatpak...",
+            target_app,
         )
         try:
-            proc = await self._run_flatpak_install()
+            proc = await self._run_flatpak_install(target_app)
             if proc.returncode == 0:
                 logger.info(
-                    "[Edge] Microsoft Edge installed successfully",
+                    "[Edge] %s installed successfully",
+                    target_app,
                 )
                 self._restore_default_browser(original_browser)
                 await self._wait_for_edge_ready()
-                # Grant udev access so Edge can detect
-                # controllers (xCloud)
-                self.ensure_controller_permissions()
+                self.ensure_controller_permissions(target_app)
                 return {
                     "success": True,
                     "message": "microsoft.browserInstalled",
@@ -306,21 +309,25 @@ class EdgeInstaller:
                 "utf-8", errors="replace",
             )[:200]
             logger.warning(
-                "[Edge] Microsoft Edge install failed: %s", stderr,
+                "[Edge] %s install failed: %s",
+                target_app,
+                stderr,
             )
             return {
                 "success": False,
                 "error": "microsoft.browserInstallFailed",
             }
         except subprocess.TimeoutExpired:
-            logger.warning("[Edge] Microsoft Edge install timed out")
+            logger.warning("[Edge] %s install timed out", target_app)
             return {
                 "success": False,
                 "error": "microsoft.edgeInstallTimeout",
             }
         except Exception as e:
             logger.warning(
-                "[Edge] Microsoft Edge install error: %s", e,
+                "[Edge] %s install error: %s",
+                target_app,
+                e,
             )
             return {
                 "success": False,
@@ -329,15 +336,9 @@ class EdgeInstaller:
 
     async def _run_flatpak_install(
         self,
+        target_app: str | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
-        """Run the flatpak install command in the executor.
-
-        The ``subprocess.run`` is synchronous and would block
-        the event loop — we trampoline through the default
-        executor. The clean env prevents session-specific
-        locale/theme variables from confusing flatpak's
-        noninteractive output parser.
-        """
+        app_id = target_app or get_target_flatpak_app()
         return await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: subprocess.run(
@@ -348,7 +349,7 @@ class EdgeInstaller:
                     "--noninteractive",
                     "-y",
                     _FLATHUB_REMOTE,
-                    _EDGE_FLATPAK_APP,
+                    app_id,
                 ],
                 capture_output=True,
                 timeout=300,
