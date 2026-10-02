@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from unifideck.auth.edge_browser import detection, installer
+from unifideck.auth.edge_browser import detection, env as env_mod, installer
 
 
 class TestEdgeArmSupport(unittest.TestCase):
@@ -20,15 +21,13 @@ class TestEdgeArmSupport(unittest.TestCase):
 
     def test_get_flatpak_apps_prioritizes_by_arch(self):
         with patch("platform.machine", return_value="aarch64"):
-            self.assertEqual(
-                detection.get_flatpak_apps(),
-                ("org.chromium.Chromium", "com.microsoft.Edge"),
-            )
+            apps = detection.get_flatpak_apps()
+            self.assertEqual(apps[0], "org.chromium.Chromium")
         with patch("platform.machine", return_value="x86_64"):
-            self.assertEqual(
-                detection.get_flatpak_apps(),
-                ("com.microsoft.Edge", "org.chromium.Chromium"),
-            )
+            apps = detection.get_flatpak_apps()
+            self.assertEqual(apps[0], "com.microsoft.Edge")
+            self.assertIn("org.chromium.Chromium", apps)
+            self.assertIn("com.google.Chrome", apps)
 
     def test_get_native_bins_prioritizes_by_arch(self):
         with patch("platform.machine", return_value="arm64"):
@@ -37,6 +36,8 @@ class TestEdgeArmSupport(unittest.TestCase):
         with patch("platform.machine", return_value="x86_64"):
             bins = detection.get_native_bins()
             self.assertEqual(bins[0], "microsoft-edge")
+            self.assertIn("chromium", bins)
+            self.assertIn("google-chrome", bins)
 
     def test_get_target_flatpak_app_by_arch(self):
         with patch("platform.machine", return_value="aarch64"):
@@ -48,24 +49,39 @@ class TestEdgeArmSupport(unittest.TestCase):
                 detection.get_target_flatpak_app(), "com.microsoft.Edge",
             )
 
-    def test_find_edge_cmd_on_arm_finds_chromium(self):
-        with patch("platform.machine", return_value="aarch64"), \
-             patch("shutil.which", return_value="/usr/bin/flatpak"), \
-             patch.object(detection, "_try_flatpak_app") as mock_try:
-            mock_try.side_effect = lambda app_id, env: (
-                ["flatpak", "run", app_id] if app_id == "org.chromium.Chromium" else None
-            )
+    def test_find_edge_cmd_finds_chromium_flatpak_filesystem(self):
+        with patch.object(Path, "is_dir", autospec=True) as mock_isdir:
+            def fake_isdir(path_obj):
+                return "org.chromium.Chromium" in str(path_obj)
+            mock_isdir.side_effect = fake_isdir
+
             cmd = detection.find_edge_cmd(lambda: {})
             self.assertEqual(cmd, ["flatpak", "run", "org.chromium.Chromium"])
 
+    def test_find_edge_cmd_finds_chrome_flatpak_filesystem(self):
+        with patch.object(Path, "is_dir", autospec=True) as mock_isdir:
+            def fake_isdir(path_obj):
+                return "com.google.Chrome" in str(path_obj)
+            mock_isdir.side_effect = fake_isdir
+
+            cmd = detection.find_edge_cmd(lambda: {})
+            self.assertEqual(cmd, ["flatpak", "run", "com.google.Chrome"])
+
     def test_find_edge_cmd_on_arm_native_fallback(self):
-        with patch("platform.machine", return_value="aarch64"), \
+        with patch.object(Path, "is_dir", return_value=False), \
              patch("shutil.which") as mock_which:
-            mock_which.side_effect = lambda bin_name: (
+            mock_which.side_effect = lambda bin_name, path=None: (
                 "/usr/bin/chromium" if bin_name == "chromium" else None
             )
             cmd = detection.find_edge_cmd(lambda: {})
-            self.assertEqual(cmd, ["chromium"])
+            self.assertEqual(cmd, ["/usr/bin/chromium"])
+
+    def test_clean_env_injects_flatpak_paths(self):
+        cleaned = env_mod.clean_env()
+        self.assertIn("XDG_DATA_DIRS", cleaned)
+        self.assertIn("flatpak", cleaned["XDG_DATA_DIRS"])
+        self.assertIn("PATH", cleaned)
+        self.assertIn("/usr/bin", cleaned["PATH"])
 
     def test_installer_installs_chromium_on_arm(self):
         inst = installer.EdgeInstaller(clean_env_fn=lambda: {})

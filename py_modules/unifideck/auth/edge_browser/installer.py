@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any
 from .detection import (
     _CHROMIUM_FLATPAK_APP,
     _EDGE_FLATPAK_APP,
+    _FLATPAK_APPS,
+    _NATIVE_BINS,
     find_edge_cmd,
     flatpak_remote_names,
     get_target_flatpak_app,
@@ -38,17 +40,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_FLATPAK_APPS = (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
 _FLATHUB_REMOTE = "flathub"
 _FLATHUB_REMOTE_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
-_NATIVE_BINS = (
-    "microsoft-edge",
-    "microsoft-edge-stable",
-    "chromium",
-    "chromium-browser",
-    "google-chrome",
-    "google-chrome-stable",
-)
 
 
 class EdgeInstaller:

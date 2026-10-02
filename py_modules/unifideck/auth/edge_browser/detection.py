@@ -21,6 +21,8 @@ import logging
 import platform
 import shutil
 import subprocess
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -31,7 +33,17 @@ logger = logging.getLogger(__name__)
 _ARM_ARCHS = frozenset({"aarch64", "arm64", "armv7l", "armv8l"})
 _EDGE_FLATPAK_APP = "com.microsoft.Edge"
 _CHROMIUM_FLATPAK_APP = "org.chromium.Chromium"
-_FLATPAK_APPS = (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
+_CHROME_FLATPAK_APP = "com.google.Chrome"
+_BRAVE_FLATPAK_APP = "com.brave.Browser"
+_VIVALDI_FLATPAK_APP = "com.vivaldi.Vivaldi"
+
+_FLATPAK_APPS = (
+    _EDGE_FLATPAK_APP,
+    _CHROMIUM_FLATPAK_APP,
+    _CHROME_FLATPAK_APP,
+    _BRAVE_FLATPAK_APP,
+    _VIVALDI_FLATPAK_APP,
+)
 _NATIVE_BINS = (
     "microsoft-edge",
     "microsoft-edge-stable",
@@ -39,6 +51,11 @@ _NATIVE_BINS = (
     "chromium-browser",
     "google-chrome",
     "google-chrome-stable",
+    "chrome",
+    "brave",
+    "brave-browser",
+    "vivaldi",
+    "vivaldi-stable",
 )
 
 
@@ -48,8 +65,20 @@ def is_arm() -> bool:
 
 def get_flatpak_apps() -> tuple[str, ...]:
     if is_arm():
-        return (_CHROMIUM_FLATPAK_APP, _EDGE_FLATPAK_APP)
-    return (_EDGE_FLATPAK_APP, _CHROMIUM_FLATPAK_APP)
+        return (
+            _CHROMIUM_FLATPAK_APP,
+            _CHROME_FLATPAK_APP,
+            _BRAVE_FLATPAK_APP,
+            _VIVALDI_FLATPAK_APP,
+            _EDGE_FLATPAK_APP,
+        )
+    return (
+        _EDGE_FLATPAK_APP,
+        _CHROMIUM_FLATPAK_APP,
+        _CHROME_FLATPAK_APP,
+        _BRAVE_FLATPAK_APP,
+        _VIVALDI_FLATPAK_APP,
+    )
 
 
 def get_native_bins() -> tuple[str, ...]:
@@ -59,6 +88,11 @@ def get_native_bins() -> tuple[str, ...]:
             "chromium-browser",
             "google-chrome",
             "google-chrome-stable",
+            "chrome",
+            "brave",
+            "brave-browser",
+            "vivaldi",
+            "vivaldi-stable",
             "microsoft-edge",
             "microsoft-edge-stable",
         )
@@ -69,6 +103,11 @@ def get_native_bins() -> tuple[str, ...]:
         "chromium-browser",
         "google-chrome",
         "google-chrome-stable",
+        "chrome",
+        "brave",
+        "brave-browser",
+        "vivaldi",
+        "vivaldi-stable",
     )
 
 
@@ -113,54 +152,82 @@ def flatpak_remote_names(
     return remotes
 
 
+def _get_flatpak_bin(env_dict: dict[str, Any] | None = None) -> str | None:
+    path_val = env_dict.get("PATH") if env_dict else None
+    bin_path = shutil.which("flatpak", path=path_val) or shutil.which("flatpak")
+    if bin_path:
+        return bin_path
+    for candidate in ("/usr/bin/flatpak", "/usr/local/bin/flatpak", "/bin/flatpak"):
+        if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def find_edge_cmd(
     clean_env_fn: Callable[[], dict[str, Any]],
 ) -> list[str] | None:
-    """Find an available Microsoft Edge browser command.
+    env = clean_env_fn()
+    flatpak_bin = _get_flatpak_bin(env)
+    for app_id in get_flatpak_apps():
+        cmd = _try_flatpak_app(app_id, clean_env_fn, flatpak_bin)
+        if cmd is not None:
+            return cmd
 
-    Checks both ``--user`` and ``--system`` flatpak installations,
-    then falls back to native Edge binaries.
-
-    Returns:
-      Command as a list (for subprocess), or ``None``.
-
-    """
-    if shutil.which("flatpak"):
-        for app_id in get_flatpak_apps():
-            cmd = _try_flatpak_app(app_id, clean_env_fn)
-            if cmd is not None:
-                return cmd
+    path_val = env.get("PATH")
     for binary in get_native_bins():
-        if shutil.which(binary):
-            return [binary]
+        found = shutil.which(binary, path=path_val) or shutil.which(binary)
+        if found:
+            return [found]
+        for candidate in (
+            f"/usr/bin/{binary}",
+            f"/usr/local/bin/{binary}",
+            f"/bin/{binary}",
+            str(Path(f"~/.local/bin/{binary}").expanduser()),
+        ):
+            if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+                return [candidate]
     return None
 
 
 def _try_flatpak_app(
-    app_id: str, clean_env_fn: Callable[[], dict[str, Any]],
+    app_id: str,
+    clean_env_fn: Callable[[], dict[str, Any]],
+    flatpak_bin: str | None = None,
 ) -> list[str] | None:
-    """Probe ``flatpak info`` for ``app_id`` in user and system scopes.
+    for app_dir in (
+        Path(f"~/.local/share/flatpak/app/{app_id}").expanduser(),
+        Path(f"/var/lib/flatpak/app/{app_id}"),
+    ):
+        if app_dir.is_dir():
+            return ["flatpak", "run", app_id]
 
-    Returns the runnable command list if the app is installed
-    in either scope, None if neither scope has it OR if the
-    probe itself raised (timeout, missing flatpak binary after
-    a race). The caller just moves to the next app_id / native
-    fallback on None.
-    """
+    resolved_flatpak = flatpak_bin or _get_flatpak_bin(clean_env_fn())
+    if not resolved_flatpak:
+        return None
+
+    env = clean_env_fn()
     try:
+        result = subprocess.run(
+            [resolved_flatpak, "info", app_id],
+            capture_output=True,
+            timeout=5,
+            env=env,
+            check=False,
+        )
+        if result.returncode == 0:
+            return ["flatpak", "run", app_id]
+
         for flag in ("--user", "--system"):
             result = subprocess.run(
-                ["flatpak", "info", flag, app_id],
-                capture_output=True, timeout=5,
-                env=clean_env_fn(),
-                check=False,  # rc is read manually below
+                [resolved_flatpak, "info", flag, app_id],
+                capture_output=True,
+                timeout=5,
+                env=env,
+                check=False,
             )
             if result.returncode == 0:
                 return ["flatpak", "run", app_id]
     except Exception as e:
-        # Flatpak probe can raise many things (subprocess
-        # timeout, OSError from missing binary after race).
-        # Fall through to the next app_id / native fallback.
         logger.debug("[Edge] flatpak probe failed for %s: %s", app_id, e)
     return None
 

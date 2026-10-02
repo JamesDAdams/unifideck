@@ -285,4 +285,28 @@ def clean_env() -> dict[str, Any]:
     env.setdefault("STEAM_COMPAT_APP_ID", "0")
     env.setdefault("SteamAppId", "0")
     env["GTK_MODULES"] = ""
+
+    flatpak_user_share = f"{home}/.local/share/flatpak/exports/share"
+    flatpak_system_share = "/var/lib/flatpak/exports/share"
+    default_data_dirs = f"{flatpak_user_share}:{flatpak_system_share}:/usr/local/share:/usr/share"
+    current_data_dirs = env.get("XDG_DATA_DIRS", "")
+    if not current_data_dirs:
+        env["XDG_DATA_DIRS"] = default_data_dirs
+    else:
+        dirs = current_data_dirs.split(":")
+        for extra in (flatpak_user_share, flatpak_system_share):
+            if extra not in dirs:
+                current_data_dirs = f"{extra}:{current_data_dirs}"
+        env["XDG_DATA_DIRS"] = current_data_dirs
+
+    flatpak_user_bin = f"{home}/.local/share/flatpak/exports/bin"
+    flatpak_system_bin = "/var/lib/flatpak/exports/bin"
+    user_local_bin = f"{home}/.local/bin"
+    current_path = env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    path_dirs = current_path.split(":")
+    for extra_bin in (user_local_bin, flatpak_user_bin, flatpak_system_bin, "/usr/local/bin", "/usr/bin", "/bin"):
+        if extra_bin not in path_dirs:
+            current_path = f"{current_path}:{extra_bin}"
+    env["PATH"] = current_path
+
     return env
