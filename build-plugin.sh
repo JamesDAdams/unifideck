@@ -963,7 +963,7 @@ build_local() {
 
     cd "$SCRIPT_DIR"
     log_info "Compiling TypeScript frontend..."
-    if ! pnpm run build; then log_error "Frontend compilation failed"; exit 1; fi
+    if ! (pnpm run build 2>/dev/null || npm run build 2>/dev/null || ./node_modules/.bin/rollup -c rollup.config.mjs); then log_error "Frontend compilation failed"; exit 1; fi
     log_success "Frontend compiled"
 
     mkdir -p "$OUTPUT_DIR"
@@ -998,6 +998,7 @@ build_local() {
 
         # Layer 2 - core infrastructure (utils, binary resolvers, file I/O)
         "py_modules/unifideck/core/__init__.py"
+        "py_modules/unifideck/core/arch.py"
         "py_modules/unifideck/core/cache_manager.py"
         "py_modules/unifideck/core/sync_service.py"
         "py_modules/unifideck/core/manifest.py"
@@ -1040,11 +1041,8 @@ build_local() {
         "py_modules/unifideck/rpc/mixins/download.py"
         "py_modules/unifideck/rpc/mixins/launch.py"
         "py_modules/unifideck/rpc/mixins/playtime.py"
-        "py_modules/unifideck/rpc/mixins/security.py"
         "py_modules/unifideck/rpc/mixins/observability.py"
         "py_modules/unifideck/rpc/mixins/action.py"
-        "py_modules/unifideck/rpc/mixins/cloud_failure.py"
-        "py_modules/unifideck/rpc/mixins/config_validation.py"
         "py_modules/unifideck/rpc/mixins/storage.py"
         "py_modules/unifideck/rpc/mixins/ui.py"
         "py_modules/unifideck/rpc/mixins/updater.py"
@@ -1102,7 +1100,7 @@ build_local() {
         "py_modules/unifideck/compatibility/proton_helpers.py"
         "py_modules/unifideck/security/__init__.py"
         "py_modules/unifideck/security/secure_token_store.py"
-        "py_modules/unifideck/security/ephemeral_creds.py"
+        "py_modules/unifideck/security/token_file.py"
         "py_modules/unifideck/metadata/__init__.py"
         "py_modules/unifideck/metadata/metacritic.py"
         "py_modules/unifideck/metadata/unifidb.py"
@@ -1419,7 +1417,12 @@ install_plugin() {
 DEV_TAG_PREFIX="Dev-"
 LEGACY_DEV_TAG="Dev"
 RETIRED_DEV_NAME="Dev (retired: use the newest Dev build)"
-GH_REPO_SLUG="mubaraknumann/unifideck"
+_remote_url=$(git config --get remote.origin.url 2>/dev/null || true)
+if [[ "$_remote_url" =~ github\.com[:/]([^/]+/[^/.]+)(\.git)?$ ]]; then
+    GH_REPO_SLUG="${BASH_REMATCH[1]}"
+else
+    GH_REPO_SLUG="JamesDAdams/unifideck"
+fi
 # Set by publish_dev_release when an explicitly requested push did not land.
 # Read by main() only after install_plugin, so a failed upload never costs you
 # the install you also asked for.
@@ -1429,6 +1432,10 @@ _gh_token() {
     # Echoes the token on stdout for capture into a local. Never log this.
     if [ -n "${GH_TOKEN:-}" ]; then printf '%s' "$GH_TOKEN"; return 0; fi
     if [ -n "${GITHUB_TOKEN:-}" ]; then printf '%s' "$GITHUB_TOKEN"; return 0; fi
+    if command -v gh >/dev/null 2>&1 && gh auth token >/dev/null 2>&1; then
+        gh auth token
+        return 0
+    fi
     [ -f "$HOME/.git-credentials" ] || return 1
     sed -n 's|https://[^:]*:\([^@]*\)@github\.com.*|\1|p' \
         "$HOME/.git-credentials" | head -1
