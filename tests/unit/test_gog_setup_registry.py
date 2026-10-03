@@ -129,3 +129,102 @@ def test_setup_args_formats_windows_paths_for_innosetup() -> None:
     assert support_arg.startswith("/supportDir=Z:\\")
     assert "1909524379" in support_arg
 
+
+# ── _format_reg_file (Batch .reg generation) ──────────────────────────
+
+
+def test_format_reg_file_emits_valid_reg_syntax() -> None:
+    actions = [
+        (
+            "goggame-1909524379.script",
+            [
+                {
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKEY_LOCAL_MACHINE",
+                            "subkey": "Software\\Techland\\CallOfJuarez",
+                            "valueName": "Path",
+                            "valueType": "string",
+                            "valueData": "{app}",
+                        },
+                    },
+                },
+                {
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKLM",
+                            "subkey": "Software\\Techland\\CallOfJuarez",
+                            "valueName": "Installed",
+                            "valueType": "dword",
+                            "valueData": "1",
+                        },
+                    },
+                },
+                {
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKLM",
+                            "subkey": "Software\\Techland\\CallOfJuarez\\Keys",
+                            "valueName": "",
+                            "valueType": "string",
+                            "valueData": "",
+                        },
+                    },
+                },
+            ],
+        ),
+    ]
+    content = scripts._format_reg_file(actions, "/var/home/armada/Games/Call of Juarez")
+    assert content.startswith("Windows Registry Editor Version 5.00")
+    assert "[HKEY_LOCAL_MACHINE\\Software\\Techland\\CallOfJuarez]" in content
+    assert "[HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\Techland\\CallOfJuarez]" in content
+    assert '"Path"="Z:\\\\var\\\\home\\\\armada\\\\Games\\\\Call of Juarez"' in content
+    assert '"Installed"=dword:00000001' in content
+    assert '@=""' in content
+
+
+async def test_apply_script_registry_uses_batch_regedit(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    async def fake_run_wine(_plan, exe, args):
+        calls.append((exe, list(args)))
+        return True
+
+    monkeypatch.setattr(scripts, "run_wine", fake_run_wine)
+    monkeypatch.setattr(
+        scripts,
+        "_load_script_actions",
+        lambda _p, _g: [
+            (
+                "goggame-1909524379.script",
+                [
+                    {
+                        "install": {
+                            "action": "setRegistry",
+                            "arguments": {
+                                "root": "HKLM",
+                                "subkey": "Software\\Techland\\CallOfJuarez",
+                                "valueName": "Path",
+                                "valueType": "string",
+                                "valueData": "{app}",
+                            },
+                        },
+                    },
+                ],
+            ),
+        ],
+    )
+
+    from types import SimpleNamespace
+    plan = SimpleNamespace(prefix_path=tmp_path)
+    await scripts.apply_script_registry(plan, "1909524379", "/games/coj")
+
+    assert len(calls) == 1
+    assert calls[0][0] == "regedit.exe"
+    assert calls[0][1][0] == "/S"
+    assert "Z:\\" in calls[0][1][1]
+
+

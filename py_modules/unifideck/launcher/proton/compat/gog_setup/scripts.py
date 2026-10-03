@@ -10,6 +10,7 @@ dialog and poisoning the prefix.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -139,6 +140,66 @@ async def _apply_set_registry(
         await run_wine(plan, "reg.exe", ["add", f"{root}\\{target}", "/f", *value_args])
 
 
+_FULL_ROOT_MAP = {
+    "HKLM": "HKEY_LOCAL_MACHINE",
+    "HKCU": "HKEY_CURRENT_USER",
+    "HKCR": "HKEY_CLASSES_ROOT",
+    "HKEY_LOCAL_MACHINE": "HKEY_LOCAL_MACHINE",
+    "HKEY_CURRENT_USER": "HKEY_CURRENT_USER",
+    "HKEY_CLASSES_ROOT": "HKEY_CLASSES_ROOT",
+}
+
+
+def _format_reg_file(
+    actions_by_script: list[tuple[str, list[Any]]], install_path: str,
+) -> str:
+    """Format all setRegistry actions into a single .reg file content."""
+    keys_map: dict[str, list[tuple[str, str, Any]]] = {}
+    for _name, actions in actions_by_script:
+        for action in actions:
+            install = action.get("install", {}) if isinstance(action, dict) else {}
+            if install.get("action") != "setRegistry":
+                continue
+            args = install.get("arguments", {}) or {}
+            raw_root = args.get("root", "")
+            root_short = _ROOT_MAP.get(raw_root, raw_root)
+            subkey = args.get("subkey", "")
+            if not root_short or not subkey:
+                continue
+            full_root = _FULL_ROOT_MAP.get(root_short, root_short)
+            value_data = args.get("valueData", "")
+            if isinstance(value_data, str):
+                value_data = value_data.replace("{app}", _win_path(install_path))
+            value_name = args.get("valueName", "")
+            val_type = str(args.get("valueType", "string")).lower()
+
+            for target in _wow64_subkeys(root_short, subkey):
+                full_key = f"{full_root}\\{target}"
+                if full_key not in keys_map:
+                    keys_map[full_key] = []
+                keys_map[full_key].append((value_name, val_type, value_data))
+
+    if not keys_map:
+        return ""
+
+    lines = ["Windows Registry Editor Version 5.00", ""]
+    for key, values in keys_map.items():
+        lines.append(f"[{key}]")
+        for vname, vtype, vdata in values:
+            name_part = f'"{vname}"' if vname else "@"
+            if vtype == "dword":
+                try:
+                    int_val = int(vdata)
+                    lines.append(f"{name_part}=dword:{int_val:08x}")
+                except ValueError:
+                    lines.append(f"{name_part}=dword:00000000")
+            else:
+                escaped = str(vdata).replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{name_part}="{escaped}"')
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _load_script_actions(
     install_path: str, game_id: str,
 ) -> list[tuple[str, list[Any]]]:
@@ -173,6 +234,31 @@ async def apply_script_registry(
     parsed = await asyncio.to_thread(
         _load_script_actions, install_path, game_id,
     )
+    if not parsed:
+        return
+
+    reg_content = _format_reg_file(parsed, install_path)
+    if reg_content and plan is not None:
+        reg_file = Path(plan.prefix_path) / f".unifideck_gog_script_{game_id}.reg"
+        try:
+            reg_file.write_text(reg_content, encoding="utf-8")
+            ok = await run_wine(
+                plan, "regedit.exe", ["/S", _win_path(str(reg_file))],
+            )
+            if ok:
+                logger.info(
+                    "[gog_setup] batch script registry imported for %s", game_id,
+                )
+                return
+        except Exception:
+            logger.warning(
+                "[gog_setup] batch regedit failed for %s — falling back to reg.exe",
+                game_id, exc_info=True,
+            )
+        finally:
+            with contextlib.suppress(OSError):
+                reg_file.unlink(missing_ok=True)
+
     for script_name, actions in parsed:
         logger.info(
             "[gog_setup] %s: %d script action(s)", script_name, len(actions),
