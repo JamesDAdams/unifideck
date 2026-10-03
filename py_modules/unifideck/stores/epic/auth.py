@@ -133,7 +133,7 @@ class EpicAuthFlow:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self._cli_path),
             )
         except OSError as e:
             logger.warning("[epic_auth] spawn for auth-check failed: %s", e)
@@ -173,7 +173,7 @@ class EpicAuthFlow:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self._cli_path),
             )
             await asyncio.wait_for(
                 proc.communicate(),
@@ -214,7 +214,7 @@ class EpicAuthFlow:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=clean_cli_env(),
+            env=clean_cli_env(for_cli=self._cli_path),
         )
 
     async def _scrape_url_from_proc(self, proc: Any) -> str | None:
@@ -276,7 +276,7 @@ class EpicAuthFlow:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=clean_cli_env(),
+            env=clean_cli_env(for_cli=self._cli_path),
         )
         try:
             stdout, stderr = await asyncio.wait_for(

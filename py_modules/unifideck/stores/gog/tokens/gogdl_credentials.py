@@ -36,6 +36,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from unifideck.core.arch import arch_scoped_cache_home_for_tool
 from unifideck.core.binaries import clean_cli_env
 
 if TYPE_CHECKING:
@@ -79,6 +80,15 @@ class _GogdlCreds:
         # LD_LIBRARY_PATH=/tmp/_MEIxxxx and any stray PYTHONPATH now reach an
         # interpreter that actually obeys them.
         env = clean_cli_env()
+        # This one env is reused by every gogdl call in the install
+        # pipeline, so the architecture-scoped cache root is set once
+        # here. Without it a gogdl running under a different
+        # architecture than whichever process last populated
+        # ``heroic_gogdl/vendored`` loads the wrong natives (see
+        # ``core.arch``).
+        scoped = arch_scoped_cache_home_for_tool("gogdl")
+        if scoped is not None:
+            env["XDG_CACHE_HOME"] = str(scoped)
         # GOGDL_CONFIG_PATH must be the persistent parent of
         # ``gogdl_config_dir`` so gogdl can populate / reuse its
         # ``heroic_gogdl/manifests/`` and dependencies-repo cache between

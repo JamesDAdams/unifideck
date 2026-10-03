@@ -132,7 +132,7 @@ class LegendaryLauncherAuth:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self._cli_path),
             )
             await asyncio.wait_for(proc.communicate(), timeout=self._info_timeout)
             logger.info(

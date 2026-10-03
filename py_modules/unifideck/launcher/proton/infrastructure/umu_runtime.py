@@ -70,6 +70,27 @@ _RECOVERABLE_CODES = {2, 74, 127}
 # ran, so the code is the game's own exit status (or normal exit) and retrying
 # would relaunch a game the user just quit or that completed its run.
 _RECOVERABLE_MAX_RUNTIME_SECONDS = 30
+# The mirror image of :data:`_RECOVERABLE_MAX_RUNTIME_SECONDS`, and the one
+# number that decides whether a non-zero exit is a LAUNCH FAILURE or the
+# GAME'S OWN exit status. :func:`_is_recoverable` asks "did this die before
+# it got going?"; this asks "did it get going at all?" — a process that
+# outlived the bootstrap window demonstrably started the runtime, the
+# prefix and the game's own loader, whatever code it then returned.
+#
+# Field case that made this load-bearing (ARM64 host, GE-Proton under
+# FEX-Emu): 20XX and Overcooked 2 each exited 3 / 127 after 30 s and 56 s
+# of running. Handlers turned every one of those into a ``GameFailedError``,
+# which fires the "failed to launch" toast and records a launch failure in
+# the circuit breaker — for a session the user played and closed. A user
+# whose game reliably exits non-zero (a launcher-style exe, a title that
+# delegates then reports its own status) was one bad run away from being
+# blocked from launching at all.
+#
+# Deliberately identical to the recoverable window so the two tests can
+# never disagree about the same span of time: under
+# :data:`_RECOVERABLE_MAX_RUNTIME_SECONDS` the code is a bootstrap failure
+# (retryable), at or over it the code is the game's (not a failure).
+_BOOTSTRAP_FAILED_SECONDS = _RECOVERABLE_MAX_RUNTIME_SECONDS
 # Recoverable codes whose likely cause is a corrupt/incomplete steamrt
 # runtime bootstrap — the only ones that justify wiping the *shared*
 # runtime cache (hundreds of MB, re-downloaded on the next launch of
@@ -359,6 +380,7 @@ async def run_umu_with_retry(
     cwd: Path | None = None,
     max_attempts: int = 2,
     on_start: Callable[[object], None] | None = None,
+    on_exit: Callable[[int, float], None] | None = None,
     should_retry: Callable[[], bool] | None = None,
     timeout: float | None = None,  # noqa: ASYNC109 — bounds a subprocess wait via wait_for + killpg, not an asyncio.timeout() wrapper
     reap_wineserver: bool = True,
@@ -390,6 +412,12 @@ async def run_umu_with_retry(
     so on the timeout path it killed the live client mid-download. The
     default stays ``True`` — one umu run per prefix is the norm, and the
     reap is what keeps a timed-out compat step from wedging its retry.
+
+    ``on_exit`` is called once per attempt with ``(rc, ran_for)`` — the
+    same two numbers :func:`_is_recoverable` is judged on. It exists so a
+    caller can tell a launch that never came up from one that ran and then
+    ended on its own terms; see :data:`_BOOTSTRAP_FAILED_SECONDS` and the
+    handlers that consume it.
     """
     last_rc = 1
     game_log = open_game_log()
@@ -411,6 +439,9 @@ async def run_umu_with_retry(
                 "[launcher.umu] attempt %d exit code: %d (ran %.1fs)",
                 attempt, rc, ran_for,
             )
+            if on_exit is not None:
+                with contextlib.suppress(Exception):
+                    on_exit(rc, ran_for)
             if rc == 0:
                 return 0
             if not _is_recoverable(rc, ran_for):

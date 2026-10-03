@@ -1,19 +1,42 @@
 """tests/unit/test_py_modules_multiarch.py — Multi-architecture Python module loading tests."""
 from __future__ import annotations
 
+import os
 import runpy
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 from unifideck.core.arch import (
+    arch_scoped_cache_home,
     clean_all_mismatched_cli_vendored_caches,
     clean_mismatched_gogdl_vendored_cache,
     clean_mismatched_legendary_vendored_cache,
     get_arch_name,
+    get_cli_elf_machine,
     get_elf_machine,
     is_arm,
     resolve_bundled_binary_path,
 )
+
+_ELF_X86_64 = b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00"
+_ELF_AARCH64 = b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00"
+
+
+def _make_zipapp(path: Path, so_member: str, so_bytes: bytes) -> Path:
+    """Build a fake zipapp CLI carrying one native module.
+
+    Mirrors the real legendary/gogdl layout: a shebang line, then a zip
+    whose native members are what get extracted to the vendored cache —
+    so the ELF inside is what decides the expected architecture.
+    """
+    import zipfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("__main__.py", "# cli\n")
+        zf.writestr(so_member, so_bytes)
+    return path
 
 
 def test_arch_helpers() -> None:
@@ -114,37 +137,83 @@ def test_get_elf_machine(tmp_path: Path) -> None:
     assert get_elf_machine(arm_elf) == 0xB7
 
 
+def test_get_cli_elf_machine(tmp_path: Path) -> None:
+    """Architecture is read from the CLI itself, in both shipped shapes."""
+    # A zipapp: the answer is the ELF of a native member it ships.
+    arm_zip = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    assert get_cli_elf_machine(arm_zip) == 0xB7
+
+    x86_zip = _make_zipapp(
+        tmp_path / "legendary_x86", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_X86_64,
+    )
+    assert get_cli_elf_machine(x86_zip) == 0x3E
+
+    # A plain ELF executable: its own header.
+    elf_bin = tmp_path / "nile"
+    elf_bin.write_bytes(_ELF_AARCH64)
+    assert get_cli_elf_machine(elf_bin) == 0xB7
+
+    # Unprovable inputs must return None, never a guess — a wrong guess
+    # would delete a cache that is perfectly fine.
+    assert get_cli_elf_machine(tmp_path / "does_not_exist") is None
+    assert get_cli_elf_machine(None) is None
+    empty = tmp_path / "empty_bin"
+    empty.write_bytes(b"")
+    assert get_cli_elf_machine(empty) is None
+
+    # A zipapp with no native member cannot answer either.
+    no_so = tmp_path / "pure_python"
+    no_so.parent.mkdir(parents=True, exist_ok=True)
+    import zipfile
+
+    with zipfile.ZipFile(no_so, "w") as zf:
+        zf.writestr("__main__.py", "# cli\n")
+    assert get_cli_elf_machine(no_so) is None
+
+
 def test_clean_mismatched_legendary_vendored_cache(tmp_path: Path) -> None:
+    """Purge is keyed to the CLI's ELF — never to platform.machine()."""
     cache_dir = tmp_path / "cache"
     vendored = cache_dir / "legendary" / "vendored"
     so_dir = vendored / "Cryptodome" / "Util"
     so_dir.mkdir(parents=True)
     sample_so = so_dir / "_cpuid_c.abi3.so"
 
+    arm_cli = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    x86_cli = _make_zipapp(
+        tmp_path / "legendary_x86", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_X86_64,
+    )
+
     # 1. Non-existent cache dir returns False
     with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path / "empty")}):
-        assert clean_mismatched_legendary_vendored_cache() is False
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is False
 
-    # 2. On aarch64, if cache holds an x86_64 .so, it gets purged
-    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
-    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="aarch64"):
-        assert clean_mismatched_legendary_vendored_cache() is True
+    # 2. an aarch64 CLI faced with an x86_64 cache purges it
+    sample_so.write_bytes(_ELF_X86_64)
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is True
         assert not vendored.exists()
 
-    # 3. On aarch64, if cache holds an aarch64 .so, it is retained
+    # 3. a matching aarch64 cache is retained
     so_dir.mkdir(parents=True)
-    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
-    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="aarch64"):
-        assert clean_mismatched_legendary_vendored_cache() is False
+    sample_so.write_bytes(_ELF_AARCH64)
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is False
         assert vendored.exists()
 
-    # 4. On x86_64, if cache holds an aarch64 .so, it gets purged
+    # 4. THE REGRESSION: an x86_64 CLI (the FEX-emulated backend) faced
+    #    with an aarch64 cache — written moments earlier by the native
+    #    launcher subprocess sharing the same HOME — must NOT purge it.
+    #    Comparing against platform.machine() deleted exactly this pair,
+    #    back and forth, on every invocation.
     with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="x86_64"):
-        assert clean_mismatched_legendary_vendored_cache() is True
-        assert not vendored.exists()
+         patch("platform.machine", return_value="aarch64"):
+        assert clean_mismatched_legendary_vendored_cache(x86_cli) is False
+        assert vendored.exists()
 
 
 def test_clean_mismatched_gogdl_vendored_cache(tmp_path: Path) -> None:
@@ -153,23 +222,29 @@ def test_clean_mismatched_gogdl_vendored_cache(tmp_path: Path) -> None:
     vendored.mkdir(parents=True)
     sample_so = vendored / "gogdl_xdelta3.abi3.so"
 
+    arm_cli = _make_zipapp(tmp_path / "gogdl", "gogdl_xdelta3.abi3.so", _ELF_AARCH64)
+
     # 1. Non-existent cache dir returns False
     with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path / "empty")}):
-        assert clean_mismatched_gogdl_vendored_cache() is False
+        assert clean_mismatched_gogdl_vendored_cache(arm_cli) is False
 
-    # 2. On aarch64, if cache holds an x86_64 .so, it gets purged
-    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
-    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="aarch64"):
-        assert clean_mismatched_gogdl_vendored_cache() is True
+    # 2. a mismatched cache gets purged
+    sample_so.write_bytes(_ELF_X86_64)
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_gogdl_vendored_cache(arm_cli) is True
         assert not vendored.exists()
 
-    # 3. On aarch64, if cache holds an aarch64 .so, it is retained
+    # 3. a matching cache is retained
     vendored.mkdir(parents=True)
-    sample_so.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
-    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="aarch64"):
-        assert clean_mismatched_gogdl_vendored_cache() is False
+    sample_so.write_bytes(_ELF_AARCH64)
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_gogdl_vendored_cache(arm_cli) is False
+        assert vendored.exists()
+
+    # 4. an unreadable/unprovable CLI must never trigger a purge
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_gogdl_vendored_cache(tmp_path / "ghost") is False
+        assert clean_mismatched_gogdl_vendored_cache(None) is False
         assert vendored.exists()
 
 
@@ -180,13 +255,166 @@ def test_clean_all_mismatched_cli_vendored_caches(tmp_path: Path) -> None:
     leg_vendored.mkdir(parents=True)
     gog_vendored.mkdir(parents=True)
 
-    (leg_vendored / "_cpuid_c.abi3.so").write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
-    (gog_vendored / "gogdl_xdelta3.abi3.so").write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    (leg_vendored / "_cpuid_c.abi3.so").write_bytes(_ELF_X86_64)
+    (gog_vendored / "gogdl_xdelta3.abi3.so").write_bytes(_ELF_X86_64)
 
-    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
-         patch("platform.machine", return_value="aarch64"):
-        clean_all_mismatched_cli_vendored_caches()
+    arm_leg = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    arm_gog = _make_zipapp(tmp_path / "gogdl", "gogdl_xdelta3.abi3.so", _ELF_AARCH64)
+
+    # A caller that already resolved its paths passes them in, so the
+    # check and the execution can never disagree.
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        clean_all_mismatched_cli_vendored_caches(
+            {"legendary": str(arm_leg), "gogdl": str(arm_gog)},
+        )
         assert not (cache_dir / "legendary" / "vendored").exists()
         assert not gog_vendored.exists()
+
+
+def test_vendored_purge_is_suppressed_within_ttl(tmp_path: Path) -> None:
+    """At most one purge per cache per TTL, even if it keeps mismatching.
+
+    A peer process that repopulates between our check and our rmtree would
+    otherwise have its cache deleted on every single invocation.
+    """
+    cache_dir = tmp_path / "cache"
+    vendored = cache_dir / "legendary" / "vendored" / "Cryptodome" / "Util"
+    vendored.mkdir(parents=True)
+    sample_so = vendored / "_cpuid_c.abi3.so"
+
+    arm_cli = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        # First call purges and writes the marker.
+        sample_so.write_bytes(_ELF_X86_64)
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is True
+        assert (cache_dir / "legendary" / ".unifideck-arch-purge").is_file()
+
+        # A peer repopulates with its own (again wrong-for-us) build.
+        vendored.mkdir(parents=True)
+        sample_so.write_bytes(_ELF_X86_64)
+
+        # Second call inside the TTL leaves it alone.
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is False
+        assert vendored.exists()
+
+        # Past the TTL the check is allowed to act again.
+        marker = cache_dir / "legendary" / ".unifideck-arch-purge"
+        stale = time.time() - 10000
+        os.utime(marker, (stale, stale))
+        assert clean_mismatched_legendary_vendored_cache(arm_cli) is True
+        assert not vendored.exists()
+
+
+def test_purge_marker_is_per_tool(tmp_path: Path) -> None:
+    """legendary's purge marker must not suppress gogdl's purge."""
+    cache_dir = tmp_path / "cache"
+    leg = cache_dir / "legendary" / "vendored" / "Cryptodome" / "Util"
+    gog = cache_dir / "heroic_gogdl" / "vendored"
+    leg.mkdir(parents=True)
+    gog.mkdir(parents=True)
+    (leg / "_cpuid_c.abi3.so").write_bytes(_ELF_X86_64)
+    (gog / "gogdl_xdelta3.abi3.so").write_bytes(_ELF_X86_64)
+
+    arm_leg = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    arm_gog = _make_zipapp(tmp_path / "gogdl", "gogdl_xdelta3.abi3.so", _ELF_AARCH64)
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        clean_all_mismatched_cli_vendored_caches(
+            {"legendary": str(arm_leg), "gogdl": str(arm_gog)},
+        )
+        assert not (cache_dir / "legendary" / "vendored").exists()
+        assert not gog.exists()
+
+
+def test_unknown_arch_cli_never_purges(tmp_path: Path) -> None:
+    """An unreadable CLI must leave the cache completely alone.
+
+    The old behaviour treated "cannot tell" as "purge and hope". Being
+    wrong that way stops a game from launching at all, which is the exact
+    failure being fixed, so an unprovable mismatch is a no-op.
+    """
+    cache_dir = tmp_path / "cache"
+    vendored = cache_dir / "legendary" / "vendored" / "Cryptodome" / "Util"
+    vendored.mkdir(parents=True)
+    (vendored / "_cpuid_c.abi3.so").write_bytes(_ELF_X86_64)
+
+    unreadable = tmp_path / "not_a_binary"
+    unreadable.write_bytes(b"not an ELF and not a zip")
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}):
+        assert clean_mismatched_legendary_vendored_cache(unreadable) is False
+        assert clean_mismatched_legendary_vendored_cache(tmp_path / "ghost") is False
+        assert vendored.exists()
+        assert not (cache_dir / "legendary" / ".unifideck-arch-purge").exists()
+
+    # ``None`` is not "unknown" — it means "use the bundled binary this
+    # process would pick", which is a real, readable binary on an
+    # installed plugin and may legitimately find a mismatch. Pin the
+    # default to an unresolvable plugin root so this test's subject (the
+    # never-guess rule) stays isolated from that fallback.
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(cache_dir)}), \
+         patch("unifideck.core.arch.plugin_root", return_value=None):
+        assert clean_mismatched_legendary_vendored_cache(None) is False
+        assert vendored.exists()
+
+
+def test_arch_scoped_cache_home_separates_architectures(tmp_path: Path) -> None:
+    """Each architecture gets its own cache root — the actual fix.
+
+    A shared directory cannot serve two architectures at once: whoever
+    extracts last wins, and the loser then deletes it. Scoping
+    XDG_CACHE_HOME means neither process can see or disturb the other's
+    files, which no purge policy can achieve.
+    """
+    arm_cli = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    x86_cli = _make_zipapp(
+        tmp_path / "legendary_x86", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_X86_64,
+    )
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path)}):
+        arm = arch_scoped_cache_home(arm_cli)
+        x86 = arch_scoped_cache_home(x86_cli)
+
+    assert arm != x86, "the two architectures must not share a cache root"
+    assert arm is not None and arm.name.endswith("b7")
+    assert x86 is not None and x86.name.endswith("3e")
+
+    # An unknown CLI gets no scope — the caller keeps its own value.
+    assert arch_scoped_cache_home(None) is None
+    assert arch_scoped_cache_home(tmp_path / "ghost") is None
+
+
+def test_clean_cli_env_scopes_the_cache_per_architecture(tmp_path: Path) -> None:
+    """clean_cli_env hands each architecture its own XDG_CACHE_HOME."""
+    from unifideck.core.binaries import clean_cli_env
+
+    arm_cli = _make_zipapp(
+        tmp_path / "legendary", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_AARCH64,
+    )
+    x86_cli = _make_zipapp(
+        tmp_path / "legendary_x86", "Cryptodome/Util/_cpuid_c.abi3.so", _ELF_X86_64,
+    )
+
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path)}, clear=False):
+        arm_env = clean_cli_env(for_cli=str(arm_cli))
+        x86_env = clean_cli_env(for_cli=str(x86_cli))
+
+    assert arm_env["XDG_CACHE_HOME"] != x86_env["XDG_CACHE_HOME"]
+
+    # A CLI with no vendored cache keeps the caller's own value.
+    other = tmp_path / "nile"
+    other.write_bytes(_ELF_AARCH64)
+    with patch.dict("os.environ", {"XDG_CACHE_HOME": str(tmp_path)}, clear=False):
+        assert clean_cli_env(for_cli=str(other))["XDG_CACHE_HOME"] == str(tmp_path)
+        assert clean_cli_env()["XDG_CACHE_HOME"] == str(tmp_path)
 
 

@@ -5,8 +5,11 @@ from pathlib import Path
 
 from unifideck.launcher.frontend_bridge import launcher_toast
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
+from unifideck.launcher.proton.infrastructure.exit_status import (
+    GameRun,
+    finish_launch,
+)
 from unifideck.launcher.proton.infrastructure.umu_runtime import run_umu_with_retry
-from unifideck.launcher.types.errors import GameFailedError, UmuRuntimeError
 
 logger = logging.getLogger(__name__)
 def _read_amazon_fuel_args(work_dir: Path) -> list[str]:
@@ -33,7 +36,7 @@ def _read_amazon_fuel_args(work_dir: Path) -> list[str]:
             "[launcher.proton.generic] fuel.json parse failed at %s", fuel,
         )
         return []
-async def _gog_launch(plan: ProtonLaunchPlan) -> int:
+async def _gog_launch(plan: ProtonLaunchPlan, run: GameRun) -> int:
     """GOG Windows launch — delegated to the GOG compat orchestrator.
 
     The orchestrator handles language, the Galaxy stub, the GOG
@@ -42,9 +45,9 @@ async def _gog_launch(plan: ProtonLaunchPlan) -> int:
     reach here — they go through ``launch_native``.
     """
     from unifideck.launcher.proton.compat.gog import run_gog_launch
-    return await run_gog_launch(plan)
+    return await run_gog_launch(plan, run=run)
 
-async def _amazon_launch(plan: ProtonLaunchPlan) -> int:
+async def _amazon_launch(plan: ProtonLaunchPlan, run: GameRun) -> int:
 
     """Amazon launch."""
     # The prefix's Windows locale used to be applied here. It is store-
@@ -79,8 +82,9 @@ async def _amazon_launch(plan: ProtonLaunchPlan) -> int:
     )
     return await run_umu_with_retry(
         argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start,
+        on_exit=run,
     )
-async def _raw_exe_launch(plan: ProtonLaunchPlan) -> int:
+async def _raw_exe_launch(plan: ProtonLaunchPlan, run: GameRun) -> int:
     """Raw exe launch."""
     logger.info(
         "[launcher.proton.generic] raw exe launch: %s", plan.context.exe_path,
@@ -95,36 +99,28 @@ async def _raw_exe_launch(plan: ProtonLaunchPlan) -> int:
         str(plan.context.exe_path),
     ])
     argv.extend(plan.state.game_args)
-    return await run_umu_with_retry(argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start)
+    return await run_umu_with_retry(
+        argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start,
+        on_exit=run,
+    )
 async def generic_launch(plan: ProtonLaunchPlan) -> int:
     """Generic launch."""
     store = plan.context.store
+    run = GameRun()
     if store == "gog":
         launcher_toast(
             "toasts.launcher.startingGogGame",
             i18n_title_key="toasts.launcher.launchingGame",
             game_title=plan.context.game_key,
         )
-        rc = await _gog_launch(plan)
+        rc = await _gog_launch(plan, run)
     elif store == "amazon":
         launcher_toast(
             "toasts.launcher.startingAmazonGame",
             i18n_title_key="toasts.launcher.launchingGame",
             game_title=plan.context.game_key,
         )
-        rc = await _amazon_launch(plan)
+        rc = await _amazon_launch(plan, run)
     else:
-        rc = await _raw_exe_launch(plan)
-    plan.state.game_exit_code = rc
-    if rc == 0:
-        return 0
-    if rc in {2, 74}:
-        raise UmuRuntimeError(
-            f"umu-run failed with unrecoverable code {rc}",
-            context={"subprocess_rc": rc, "store": store},
-        )
-    raise GameFailedError(
-        f"{store} game exited with code {rc}",
-        subprocess_rc=rc,
-        context={"store": store, "game_id": plan.context.game_id},
-    )
+        rc = await _raw_exe_launch(plan, run)
+    return finish_launch(plan, rc, run)

@@ -332,7 +332,7 @@ class GOGCloudSaveStrategy(GOGStateMixin, CloudSaveStrategy):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self.gogdl_bin),
             )
             stdout, stderr = await proc.communicate()
             if proc.returncode != 0:

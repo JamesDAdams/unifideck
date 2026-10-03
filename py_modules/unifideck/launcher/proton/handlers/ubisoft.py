@@ -21,6 +21,10 @@ from unifideck.launcher.proton.handlers.ubisoft_recovery import (
     find_upc_in,
 )
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
+from unifideck.launcher.proton.infrastructure.exit_status import (
+    GameRun,
+    finish_launch,
+)
 from unifideck.launcher.proton.infrastructure.umu_runtime import run_umu_with_retry
 from unifideck.launcher.types.errors import GameFailedError, UmuRuntimeError
 
@@ -109,6 +113,7 @@ def _find_upc_exe(plan: ProtonLaunchPlan) -> Path | None:
 async def _run_upc_with_session_handoff(
     plan: ProtonLaunchPlan,
     argv: list[str],
+    run: GameRun,
 ) -> int:
     """Run UPC with the session baton passed in before and out after.
 
@@ -128,12 +133,18 @@ async def _run_upc_with_session_handoff(
 
     All three moves are best-effort and run off the event loop: they touch the
     filesystem and wait for UPC to exit, and none may fail a launch.
+
+    ``run`` records how long the run lasted so the caller can tell a UPC
+    that never came up from one the user closed after playing — see
+    ``infrastructure.exit_status``. UPC is a long-lived client process, so
+    this matters more here than for a plain exe: it is exactly the shape
+    that used to be reported as a failed launch.
     """
     await asyncio.to_thread(seed_before_launch, plan.prefix_path)
     before = await asyncio.to_thread(vault_fingerprint, plan.prefix_path)
     try:
         return await run_umu_with_retry(
-            argv, env=plan.env, on_start=plan.on_process_start,
+            argv, env=plan.env, on_start=plan.on_process_start, on_exit=run,
         )
     finally:
         await asyncio.to_thread(capture_after_exit, plan.prefix_path, before)
@@ -173,6 +184,7 @@ async def ubisoft_launch(plan: ProtonLaunchPlan) -> int:
             subprocess_rc=127,
             context={"store": "ubisoft", "prefix": str(plan.prefix_path)},
         )
+    run = GameRun()
     uplay_id = os.environ.get("UPLAY_ID") or _uplay_id_from_id_map(
         plan.context.game_id,
     )
@@ -202,12 +214,8 @@ async def ubisoft_launch(plan: ProtonLaunchPlan) -> int:
             game_title=resolve_title(plan.context.game_key),
             severity="warning",
         )
-    rc = await _run_upc_with_session_handoff(plan, argv)
-    plan.state.game_exit_code = rc
-    if rc == 0:
-        return 0
-    _raise_for_umu_rc(rc, plan)
-    return rc
+    rc = await _run_upc_with_session_handoff(plan, argv, run)
+    return finish_launch(plan, rc, run)
 
 async def ubisoft_auth_launch(plan: ProtonLaunchPlan) -> int:
     """Open Ubisoft Connect (UPC) in the auth prefix so the user signs in.
@@ -394,7 +402,17 @@ def _apply_language_setup(plan: ProtonLaunchPlan) -> None:
             err,
         )
 def _raise_for_umu_rc(rc: int, plan: ProtonLaunchPlan) -> None:
-    """Raise for UMU rc."""
+    """Raise for UMU rc.
+
+    Now unused: :func:`ubisoft_launch` routes through
+    ``infrastructure.exit_status.finish_launch``, which applies the
+    same 2/74 rule AND stops treating a non-zero code from a session that
+    actually ran as a failed launch. Kept as the reference shape for the
+    two Ubisoft paths that intentionally do NOT use it — the auth session
+    and the install-time session below — because both report a client
+    exit code straight back to their caller and neither has a game
+    bootstrap to protect. Delete once those are reworked.
+    """
     if rc in {2, 74}:
         raise UmuRuntimeError(
             f"umu-run failed with unrecoverable code {rc}",

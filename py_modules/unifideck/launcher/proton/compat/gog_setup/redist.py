@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from unifideck.core.arch import resolve_bundled_binary_path
+from unifideck.core.binaries import clean_cli_env
 from unifideck.launcher.frontend_bridge import launcher_toast
 
 from .common import AUTH_CONFIG, REDIST_DIR, run_wine
@@ -101,6 +102,11 @@ async def _run_redist_download(gogdl: Path, missing: list[str]) -> None:
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
+            # gogdl is a zipapp that extracts natives under
+            # XDG_CACHE_HOME; scope it to this binary's architecture so a
+            # native launcher's gogdl and the FEX-emulated backend's
+            # cannot evict each other (see core.arch).
+            env=clean_cli_env(for_cli=str(gogdl)),
         )
         _out, err = await proc.communicate()
         if proc.returncode != 0:

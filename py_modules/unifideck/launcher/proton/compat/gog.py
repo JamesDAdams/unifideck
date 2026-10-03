@@ -16,14 +16,15 @@ import contextlib
 import json
 import logging
 import os
-import platform
 import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from unifideck.core.arch import resolve_bundled_binary_path
+from unifideck.launcher.proton.infrastructure.exit_status import GameRun
 from unifideck.launcher.proton.infrastructure.umu_runtime import (
     run_umu_with_retry,
 )
@@ -274,6 +275,7 @@ def _install_language(work_dir: Path) -> str:
 
 async def _run_umu_exe(
     plan: ProtonLaunchPlan, exe_path: Path, work_dir: Path, *, max_attempts: int = 2,
+    on_exit: Callable[[int, float], None] | None = None,
 ) -> int:
     """Run a Windows exe through umu (shared by primary + fallback).
 
@@ -291,6 +293,12 @@ async def _run_umu_exe(
     ``arguments`` (see :func:`_read_required_launch_args`); those are
     prepended before the user's own launch options, mirroring
     ``_read_amazon_fuel_args`` in ``handlers/generic.py``.
+
+    ``on_exit`` reports ``(rc, ran_for)`` per attempt so the caller can
+    distinguish a stub that bailed during bootstrap from a game that ran
+    and then ended on its own terms — see ``handlers.exit_status``. It is
+    also what ``_run_gog_with_fallback`` needs to log, so both callers
+    read one timer rather than each keeping its own.
     """
     cwd = exe_path.parent if exe_path.parent.is_dir() else None
     required_args = _read_required_launch_args(work_dir, exe_path)
@@ -301,19 +309,31 @@ async def _run_umu_exe(
     return await run_umu_with_retry(
         argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start,
         max_attempts=max_attempts,
+        on_exit=on_exit,
     )
 
 
-async def run_gog_launch(plan: ProtonLaunchPlan) -> int:
+async def run_gog_launch(
+    plan: ProtonLaunchPlan,
+    *,
+    run: GameRun,
+) -> int:
     """Full GOG Windows launch: setup → Comet → run (with stub fallback).
 
     Returns the umu exit code; ``generic_launch`` maps it to a Result.
     GOG *native* (start.sh) never reaches here — it goes via launch_native.
+
+    ``run`` is the per-launch recorder from
+    ``infrastructure.exit_status``, handed to the umu runs so the caller
+    can tell a launcher stub that bailed during bootstrap from a game that
+    ran and ended on its own terms. Required rather than optional: the
+    fallback gate below and the caller's final verdict must read the same
+    measurement, so there is no correct way to omit it.
     """
     work_dir = Path(plan.context.work_dir or plan.context.exe_path.parent)
     await _apply_gog_prelaunch_setup(plan, work_dir)
     plan.env["PROTON_ENABLE_NVAPI"] = "1"
-    return await _run_gog_with_fallback(plan, work_dir)
+    return await _run_gog_with_fallback(plan, work_dir, run=run)
 
 
 async def _apply_gog_prelaunch_setup(
@@ -354,13 +374,22 @@ async def _apply_gog_prelaunch_setup(
 
 async def _run_gog_with_fallback(
     plan: ProtonLaunchPlan, work_dir: Path,
+    *, run: GameRun,
 ) -> int:
     """Run via Comet; retry the real game exe if a launcher stub bails early."""
     comet = start_comet(plan)
     try:
-        start = time.monotonic()
-        rc = await _run_umu_exe(plan, plan.context.exe_path, work_dir)
-        elapsed = time.monotonic() - start
+        rc = await _run_umu_exe(
+            plan, plan.context.exe_path, work_dir, on_exit=run,
+        )
+        # ``run`` is the GameRun recorder umu itself feeds (see
+        # ``infrastructure.exit_status``), so ``last_ran_for`` is the
+        # exact span of the attempt that just ended — the same span the
+        # launch's own bootstrap-vs-played verdict will read. One clock,
+        # two decisions that must never disagree: an earlier version kept
+        # a second ``time.monotonic()`` pair here, so the fallback could
+        # be gated on a different answer than ``finish_launch`` gave.
+        elapsed = run.last_ran_for
         if rc != 0 and elapsed < EARLY_EXIT_SECONDS:
             fallback = resolve_fallback_exe(str(work_dir))
             if fallback and fallback != str(plan.context.exe_path):
@@ -370,6 +399,7 @@ async def _run_gog_with_fallback(
                 )
                 rc = await _run_umu_exe(
                     plan, Path(fallback), work_dir, max_attempts=1,
+                    on_exit=run,
                 )
         return rc
     finally:

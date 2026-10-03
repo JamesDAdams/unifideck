@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from unifideck.core.arch import (
+    arch_scoped_cache_home,
     clean_mismatched_legendary_vendored_cache,
     resolve_bundled_binary_path,
 )
@@ -61,17 +62,24 @@ def resolve_legendary_bin(plugin_dir: Path) -> str:
 
     Bare ``legendary`` isn't on PATH in the launcher's scrubbed env, so
     prefer the plugin-bundled copy (an env override wins if set).
-    Also ensures any existing ~/.cache/legendary/vendored directory
-    matches host CPU architecture before legendary runs.
+
+    Whichever binary wins is also what the vendored-cache architecture
+    check is measured against — see ``core.arch``. The check must key to
+    THIS binary, not to ``platform.machine()``: on an ARM64 host running
+    the backend under FEX-Emu, the backend and the launcher subprocess are
+    different architectures sharing one ``~/.cache/legendary``, and a
+    machine-based check had them purge each other's natives in a loop.
     """
-    clean_mismatched_legendary_vendored_cache()
     if os.environ.get("LEGENDARY_BIN"):
-        return os.environ["LEGENDARY_BIN"]
-    return resolve_bundled_binary_path(plugin_dir, "legendary")
+        path = os.environ["LEGENDARY_BIN"]
+    else:
+        path = resolve_bundled_binary_path(plugin_dir, "legendary")
+    clean_mismatched_legendary_vendored_cache(path)
+    return path
 
 
 def build_legendary_env(
-    plan: ProtonLaunchPlan, config_path: str,
+    plan: ProtonLaunchPlan, config_path: str, legendary_bin: str | None = None,
 ) -> dict[str, str]:
     """Build the env for the legendary launch.
 
@@ -79,6 +87,21 @@ def build_legendary_env(
     itself), drop any stale ``LEGENDARY_WRAPPER_EXE`` (set only for the
     Ubisoft-on-Epic path), tag the Heroic app runner, and point at the
     authenticated legendary config (auth + EOS overlay registry).
+
+    ``legendary_bin`` is the binary :func:`resolve_legendary_bin` chose.
+    It is threaded through for one reason that is NOT optional: legendary
+    is a zipapp that extracts its native modules under
+    ``XDG_CACHE_HOME``, and on an ARM64 host the long-lived Decky backend
+    and this per-launch subprocess are DIFFERENT architectures (the
+    backend runs under FEX-Emu). Pointing this env at the binary's own
+    architecture-scoped cache is what stops the two from extracting into
+    one shared directory and evicting each other — the exact cause of
+    ``No module named 'Cryptodome.Cipher'`` and
+    ``Cannot load native module 'Cryptodome.Util._cpuid_c'`` that made
+    Epic games refuse to start. Omitting it leaves the backend's scoped
+    root off the launch path entirely, which is not a degradation but a
+    regression, so the default resolves the same binary this process
+    would run.
     """
     env = dict(plan.env)
     # STORE=none keeps umu from applying an egs profile to the legendary
@@ -95,6 +118,16 @@ def build_legendary_env(
     env["HEROIC_APP_RUNNER"] = "legendary"
     if config_path:
         env["LEGENDARY_CONFIG_PATH"] = config_path
+    if legendary_bin is not None:
+        scoped = arch_scoped_cache_home(legendary_bin)
+        if scoped is not None:
+            env["XDG_CACHE_HOME"] = str(scoped)
+        else:
+            logger.warning(
+                "[compat.epic] could not scope the cache root for %s — "
+                "legendary will share ~/.cache with any other architecture "
+                "on this host", legendary_bin,
+            )
     return env
 
 

@@ -37,6 +37,7 @@ those name, and pinning them here would strand the caches).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 # Loader variables, plus PyInstaller's ``*_ORIG`` stashes. The stashes are
 # dropped rather than restored: the pre-freeze value is Steam's, which is no
@@ -59,9 +60,18 @@ _PYTHON_VARS = (
 
 SCRUBBED_VARS: tuple[str, ...] = (*_LOADER_VARS, *_PYTHON_VARS)
 
+#: Bundled CLIs that extract native modules into a shared, per-user cache
+#: directory and then load them by path. Only these have a vendored-cache
+#: architecture to verify (see ``core.arch``); the others ship their natives
+#: inside their own binary or do not have any. Keyed by the tool's file
+#: name, which is what ``clean_cli_env(for_cli=…)`` compares against.
+_VENDORED_CACHE_TOOLS = frozenset({"legendary", "gogdl"})
+
 
 def clean_cli_env(
     overrides: dict[str, str] | None = None,
+    *,
+    for_cli: str | None = None,
 ) -> dict[str, str]:
     """Return ``os.environ`` minus the vars that break a bundled CLI.
 
@@ -69,14 +79,35 @@ def clean_cli_env(
       overrides: extra variables to set on top, applied AFTER scrubbing so
         a caller can still pass a deliberate ``PYTHONPATH`` if it ever
         needs one.
+      for_cli: the bundled CLI about to be spawned under this env. Only
+        consulted when it is one of the zipapp tools that extract native
+        modules into a shared cache (``legendary``, ``gogdl``), and then
+        used to verify that cache against the binary that will actually
+        load it. Every other CLI — and any whose architecture cannot be
+        read — skips the check entirely.
 
     Returns:
       A new dict — ``os.environ`` itself is never mutated, so this is safe
       to call from the long-lived backend process.
     """
-    from unifideck.core.arch import clean_all_mismatched_cli_vendored_caches
+    from unifideck.core.arch import (
+        arch_scoped_cache_home,
+        clean_all_mismatched_cli_vendored_caches,
+    )
 
-    clean_all_mismatched_cli_vendored_caches()
+    tool = Path(for_cli).name if for_cli else ""
+    if tool in _VENDORED_CACHE_TOOLS:
+        clean_all_mismatched_cli_vendored_caches({tool: for_cli})
+        # Give each architecture its own vendored-cache root (see
+        # ``core.arch``). On a host that runs this backend and its
+        # launcher subprocesses under DIFFERENT architectures — ARM64
+        # with the backend under FEX-Emu — both extract into the same
+        # ``~/.cache/legendary``, and neither can use what the other
+        # wrote. Scoping the variable ends that entirely instead of
+        # deleting each other's files when it is detected.
+        scoped = arch_scoped_cache_home(for_cli)
+        if scoped is not None:
+            overrides = {**(overrides or {}), "XDG_CACHE_HOME": str(scoped)}
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED_VARS}
     if overrides:
         env.update(overrides)

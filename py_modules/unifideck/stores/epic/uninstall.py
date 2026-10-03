@@ -107,7 +107,7 @@ async def best_effort_legendary_uninstall(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=clean_cli_env(),
+            env=clean_cli_env(for_cli=cli_path),
         )
     except OSError as e:
         logger.warning("[EpicUninstall] could not spawn legendary: %s", e)

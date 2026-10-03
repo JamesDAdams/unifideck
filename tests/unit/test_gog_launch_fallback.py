@@ -15,8 +15,9 @@ These tests pin:
     elapsed < EARLY_EXIT_SECONDS) and resolves to a different exe.
 
 ``_run_umu_exe`` is stubbed with a spy so no real umu is spawned; it
-records the ``max_attempts`` each call received. ``time.monotonic`` is
-scripted to control the elapsed-time branch deterministically.
+records the ``max_attempts`` each call received. Each call passes a ``GameRun`` recorder and the
+stub feeds it, so the elapsed-time branch is driven by the same
+measurement the production code reads.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from types import SimpleNamespace
 import pytest
 
 from unifideck.launcher.proton.compat import gog
+from unifideck.launcher.proton.infrastructure.exit_status import GameRun
 
 
 def _make_plan(exe_path: str):
@@ -50,15 +52,17 @@ def gog_harness(monkeypatch):
     script the exit codes, the elapsed clock, and the resolver result.
     """
     calls: list[tuple[str, int]] = []
-    state = {"codes": [], "clock": [0.0, 0.0], "fallback": None}
+    state = {"codes": [], "elapsed": 0.0, "fallback": None}
 
-    async def _spy_run_umu_exe(_plan, exe_path, _work_dir, *, max_attempts=2):
+    async def _spy_run_umu_exe(_plan, exe_path, _work_dir, *, max_attempts=2, on_exit=None):
         calls.append((Path(exe_path).name, max_attempts))
-        return state["codes"].pop(0)
-
-    def _fake_monotonic():
-        # First call = start, second = after the primary run.
-        return state["clock"].pop(0) if state["clock"] else 0.0
+        rc = state["codes"].pop(0)
+        # Report the attempt the way umu does, through the same recorder
+        # the production code reads its elapsed time from — the fallback
+        # decision and ``handlers.exit_status`` must judge one clock.
+        if on_exit is not None:
+            on_exit(rc, float(state["elapsed"]))
+        return rc
 
     def _fake_resolve(_install_path):
         return state["fallback"]
@@ -66,7 +70,6 @@ def gog_harness(monkeypatch):
     monkeypatch.setattr(gog, "_run_umu_exe", _spy_run_umu_exe)
     monkeypatch.setattr(gog, "start_comet", lambda _plan: None)
     monkeypatch.setattr(gog, "resolve_fallback_exe", _fake_resolve)
-    monkeypatch.setattr(gog.time, "monotonic", _fake_monotonic)
 
     class _H:
         @staticmethod
@@ -76,8 +79,8 @@ def gog_harness(monkeypatch):
         @staticmethod
         def script(*, codes, elapsed, fallback):
             state["codes"] = list(codes)
-            # start=0, after-primary=elapsed → elapsed seconds observed.
-            state["clock"] = [0.0, float(elapsed)]
+            # Seconds the primary attempt is scripted to have run for.
+            state["elapsed"] = float(elapsed)
             state["fallback"] = fallback
 
     return _H
@@ -92,7 +95,7 @@ async def test_fallback_exe_runs_single_attempt(gog_harness):
     )
     plan = _make_plan("/games/rcg2/launcher.exe")
 
-    rc = await gog._run_gog_with_fallback(plan, Path("/games/rcg2"))
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/rcg2"), run=GameRun())
 
     assert rc == 0
     assert gog_harness.calls() == [
@@ -106,7 +109,7 @@ async def test_no_fallback_when_primary_succeeds(gog_harness):
     gog_harness.script(codes=[0], elapsed=2, fallback="/games/x/game.exe")
     plan = _make_plan("/games/x/launcher.exe")
 
-    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"))
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())
 
     assert rc == 0
     assert gog_harness.calls() == [("launcher.exe", 2)]
@@ -120,8 +123,9 @@ async def test_no_fallback_when_slow_exit(gog_harness):
         fallback="/games/x/game.exe",
     )
     plan = _make_plan("/games/x/launcher.exe")
+    run = GameRun()
 
-    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"))
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=run)
 
     assert rc == 1
     assert gog_harness.calls() == [("launcher.exe", 2)]
@@ -136,7 +140,7 @@ async def test_no_fallback_when_resolver_returns_same_exe(gog_harness):
     )
     plan = _make_plan("/games/x/launcher.exe")
 
-    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"))
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())
 
     assert rc == 3
     assert gog_harness.calls() == [("launcher.exe", 2)]
@@ -147,7 +151,7 @@ async def test_no_fallback_when_resolver_returns_none(gog_harness):
     gog_harness.script(codes=[3], elapsed=2, fallback=None)
     plan = _make_plan("/games/x/launcher.exe")
 
-    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"))
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())
 
     assert rc == 3
     assert gog_harness.calls() == [("launcher.exe", 2)]

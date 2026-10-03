@@ -8,8 +8,11 @@ from pathlib import Path
 from unifideck.launcher.frontend_bridge import launcher_toast
 from unifideck.launcher.proton.compat.epic_cleanup import cleanup_epic_artifacts
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
+from unifideck.launcher.proton.infrastructure.exit_status import (
+    GameRun,
+    finish_launch,
+)
 from unifideck.launcher.proton.infrastructure.umu_runtime import run_umu_with_retry
-from unifideck.launcher.types.errors import GameFailedError, UmuRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +117,14 @@ async def epic_launch(plan: ProtonLaunchPlan) -> int:
     )
     apply_rockstar_egs_setup(plan)
     legendary_bin, env = await _prepare_epic_env(plan)
-    rc = await _run_epic_game(plan, legendary_bin, env)
-    return _finish_epic_launch(plan, rc)
+    run = GameRun()
+    rc = await _run_epic_game(plan, legendary_bin, env, run)
+    return _finish_epic_launch(plan, rc, run)
 
 
 async def _run_epic_game(
     plan: ProtonLaunchPlan, legendary_bin: str, env: dict[str, str],
+    run: GameRun,
 ) -> int:
     """Resolve legendary's launch recipe, then run umu-run ourselves.
 
@@ -160,6 +165,7 @@ async def _run_epic_game(
         env=game_env,
         cwd=resolve_cwd(params),
         on_start=plan.on_process_start,
+        on_exit=run,
     )
 
 
@@ -185,7 +191,7 @@ async def _prepare_epic_env(
         logger.exception(
             "[launcher.proton.epic] EOS overlay step failed (non-fatal)",
         )
-    return legendary_bin, build_legendary_env(plan, config_path)
+    return legendary_bin, build_legendary_env(plan, config_path, legendary_bin)
 
 
 def _resolve_epic_language(plan: ProtonLaunchPlan) -> str:
@@ -305,14 +311,15 @@ def _build_legendary_argv(
     return argv
 
 
-def _finish_epic_launch(plan: ProtonLaunchPlan, rc: int) -> int:
+def _finish_epic_launch(plan: ProtonLaunchPlan, rc: int, run: GameRun) -> int:
     """Record the exit code; raise on unrecoverable failures.
 
     Since UD-126 ``rc`` is the **game's** exit code, not legendary's:
     :func:`_run_epic_game` awaits the umu-run it spawned itself, so this
     process lives exactly as long as the game and Steam tracks the
     session (window focus in Gaming Mode, Stop, playtime, cloud sync-up).
-    Identical handling to ``generic_launch`` — Epic is no longer special.
+    Identical handling to ``generic_launch`` — Epic is no longer special,
+    which is why the decision itself now lives in ``exit_status``.
 
     Historical note for anyone tempted to reintroduce a wait loop: an
     early 0.7 build "waited" by polling ``pgrep -f
@@ -320,16 +327,4 @@ def _finish_epic_launch(plan: ProtonLaunchPlan, rc: int) -> int:
     manager in Gaming Mode and hung the launcher forever. No process
     matching is involved here; we hold the pid.
     """
-    plan.state.game_exit_code = rc
-    if rc == 0:
-        return 0
-    if rc in {2, 74}:
-        raise UmuRuntimeError(
-            f"umu-run failed with unrecoverable code {rc}",
-            context={"subprocess_rc": rc, "store": "epic"},
-        )
-    raise GameFailedError(
-        f"Epic game exited with code {rc}",
-        subprocess_rc=rc,
-        context={"store": "epic", "game_id": plan.context.game_id},
-    )
+    return finish_launch(plan, rc, run)

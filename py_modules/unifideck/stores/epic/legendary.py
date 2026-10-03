@@ -121,7 +121,7 @@ async def fetch_info(cli_path: str, game_id: str, *, timeout: float, log_prefix:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=clean_cli_env(),
+            env=clean_cli_env(for_cli=cli_path),
         )
         stdout, _ = await asyncio.wait_for(
             proc.communicate(),

@@ -74,7 +74,7 @@ class EpicUpdateChecker:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self._cli_path),
             )
             stdout, _ = await asyncio.wait_for(
                 proc.communicate(),

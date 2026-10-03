@@ -113,7 +113,7 @@ class EpicCloudSaveStrategy(CloudSaveStrategy):
             cmd = [self.legendary_bin, "info", game_id, "--json"]
             res = subprocess.run(
                 cmd, capture_output=True, text=True,
-                env=clean_cli_env(), check=True,
+                env=clean_cli_env(for_cli=self.legendary_bin), check=True,
             )
             data = json.loads(res.stdout)
 
@@ -207,7 +207,7 @@ class EpicCloudSaveStrategy(CloudSaveStrategy):
                 self.legendary_bin, "list-saves", game_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self.legendary_bin),
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
         except Exception as e:
@@ -260,7 +260,7 @@ class EpicCloudSaveStrategy(CloudSaveStrategy):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self.legendary_bin),
             )
             _stdout, stderr = await proc.communicate()
             stderr_text = stderr.decode(errors="replace")
@@ -311,7 +311,7 @@ class EpicCloudSaveStrategy(CloudSaveStrategy):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=clean_cli_env(),
+                env=clean_cli_env(for_cli=self.legendary_bin),
             )
             _stdout, stderr = await proc.communicate()
             if proc.returncode != 0:

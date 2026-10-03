@@ -305,7 +305,7 @@ class EpicInstaller:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=clean_cli_env(),
+            env=clean_cli_env(for_cli=cmd[0]),
         )
         tail_buf = TailRingBuffer()
         stalled: InstallStalledError | None = None
