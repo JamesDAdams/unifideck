@@ -23,13 +23,20 @@ _VALID_MANIFEST = '"manifest"\n{\n  "commandline" "/proton run"\n}\n'
 
 
 def _make_proton(
-    root, *, exe=True, files=True, wine=True, wine64=False, compat_vdf=None,
+    root, *, exe=True, files=True, wine=True, wine64=False,
+    wine_bin_arm64=False, compat_vdf=None,
     version="1.0", manifest=_VALID_MANIFEST,
 ):
     """Build a Proton tool dir; return the ``proton`` script path.
 
     ``manifest`` writes ``toolmanifest.vdf``; pass ``None`` to omit the file
     or ``""`` to model the truncated-download case.
+
+    ``wine_bin_arm64`` models the real on-device layout of native ARM64
+    Protons (Proton Experimental (ARM64), proton-cachyos-11.0-arm64):
+    confirmed on 2026-10-03 to ship their Wine loader at
+    ``files/bin-arm64/wine`` — NOT ``files/bin/wine`` or
+    ``files/bin/wine64`` — with no ``files/bin/`` directory at all.
     """
     root.mkdir(parents=True, exist_ok=True)
     proton = root / "proton"
@@ -39,12 +46,17 @@ def _make_proton(
     else:
         proton.chmod(proton.stat().st_mode & ~stat.S_IXUSR)
     if files:
-        bindir = root / "files" / "bin"
+        files_dir = root / "files"
+        bindir = files_dir / "bin"
         bindir.mkdir(parents=True, exist_ok=True)
         if wine:
             (bindir / "wine").write_text("")
         if wine64:
             (bindir / "wine64").write_text("")
+        if wine_bin_arm64:
+            bindir_arm64 = files_dir / "bin-arm64"
+            bindir_arm64.mkdir(parents=True, exist_ok=True)
+            (bindir_arm64 / "wine").write_text("")
     if compat_vdf is not None:
         (root / "compatibilitytool.vdf").write_text(compat_vdf)
     if version is not None:
@@ -135,6 +147,39 @@ def test_arm64_wine64_only_passes(tmp_path):
     assert ge_installer.is_proton_install_complete(proton) is True
 
 
+def test_arm64_bin_arm64_wine_passes(tmp_path):
+    """Real on-device layout (confirmed 2026-10-03): native ARM64 Protons
+
+    ("Proton Experimental (ARM64)", "proton-cachyos-11.0-arm64") ship
+    their Wine loader at ``files/bin-arm64/wine`` — NOT
+    ``files/bin/wine`` or ``files/bin/wine64`` — and have no
+    ``files/bin/`` directory at all, no ``compatibilitytool.vdf``
+    either (for the official Proton Experimental ARM64 build). Without
+    this check both native ARM64 Protons were rejected as "incomplete"
+    and every launch silently fell back to an incompatible x86_64
+    GE-Proton, breaking 32-bit DXVK/Vulkan for titles like
+    Hitman: Absolution.
+    """
+    proton = _make_proton(
+        tmp_path / "Proton Experimental (ARM64)",
+        wine=False,
+        wine64=False,
+        wine_bin_arm64=True,
+    )
+    assert ge_installer.is_proton_install_complete(proton) is True
+
+
+def test_arm64_bin_arm64_wine_passes_distro_package(tmp_path):
+    """proton-cachyos-11.0-arm64 also ships files/bin-arm64/wine, confirmed on-device."""
+    proton = _make_proton(
+        tmp_path / "proton-cachyos-11.0-arm64",
+        wine=False,
+        wine64=False,
+        wine_bin_arm64=True,
+    )
+    assert ge_installer.is_proton_install_complete(proton) is True
+
+
 def test_distro_package_with_compatibilitytool_vdf_and_no_files_passes(tmp_path):
     """Distro packages (e.g. proton-cachyos) without files/ pass via compatibilitytool.vdf."""
     proton = _make_proton(
@@ -191,6 +236,30 @@ def test_resolve_logged_accepts_arm64_proton_experimental(tmp_path, monkeypatch)
         tmp_path / "Proton Experimental (ARM64)",
         wine=False,
         wine64=True,
+    )
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: arm64_exp)
+
+    tried: list[str] = []
+    result = selector._resolve_logged("saved", "proton_experimental", tried)
+
+    assert result == arm64_exp
+
+
+def test_resolve_logged_accepts_real_arm64_proton_experimental_layout(
+    tmp_path, monkeypatch,
+):
+    """Regression test for the real on-device layout (bin-arm64/wine),
+
+    distinct from the hypothetical wine64 layout above — a field bundle
+    showed ``files/bin/`` does not even exist on native ARM64 Proton,
+    so a fix that only recognised ``wine64`` still rejected the real
+    install and fell back to GE-Proton11-7.
+    """
+    arm64_exp = _make_proton(
+        tmp_path / "Proton Experimental (ARM64)",
+        wine=False,
+        wine64=False,
+        wine_bin_arm64=True,
     )
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: arm64_exp)
 

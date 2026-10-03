@@ -185,10 +185,19 @@ def is_proton_install_complete(proton_script: Path) -> bool:
       ``os.access(X_OK)``" guard — a survived-partial-extract copy is
       left non-executable);
     * a ``files/`` subdir (the Wine/runtime payload) exists and is
-      non-empty, with the Wine loader (``files/bin/wine`` or ``files/bin/wine64``)
-      present — the payload a hung wineserver needs and the piece a truncated
-      extract most often lacks; or a distro-packaged tool with ``compatibilitytool.vdf``
-      where ``files/`` may be absent or system-provided;
+      non-empty, with the Wine loader present under ANY of
+      ``files/bin/wine``, ``files/bin/wine64``, or
+      ``files/bin-arm64/wine`` — the last is the layout confirmed
+      on-device for native ARM64 Protons ("Proton Experimental
+      (ARM64)", "proton-cachyos-11.0-arm64"), which ship no
+      ``files/bin/`` directory at all. An earlier fix checked only
+      ``wine``/``wine64`` under ``files/bin/``, so both native ARM64
+      Protons were still rejected as "incomplete" and every launch
+      silently fell back to an incompatible x86_64 GE-Proton — the
+      cause of a 32-bit DXVK/Vulkan crash in Hitman: Absolution and
+      other 32-bit titles on ARM64 SteamOS. Distro-packaged tools with
+      a ``compatibilitytool.vdf`` are accepted even without any Wine
+      loader match, since the system may provide Wine outside ``files/``;
     * a readable, non-empty ``version`` marker;
     * a readable, non-empty ``toolmanifest.vdf``. umu parses this file
       before it launches anything (``CompatLayer.__init__`` does
@@ -220,9 +229,12 @@ def is_proton_install_complete(proton_script: Path) -> bool:
         if files_dir.is_dir():
             if not any(files_dir.iterdir()):
                 return False
-            wine_bin = files_dir / "bin" / "wine"
-            wine64_bin = files_dir / "bin" / "wine64"
-            if not (wine_bin.is_file() or wine64_bin.is_file()) and not has_compat_vdf:
+            wine_candidates = (
+                files_dir / "bin" / "wine",
+                files_dir / "bin" / "wine64",
+                files_dir / "bin-arm64" / "wine",
+            )
+            if not any(c.is_file() for c in wine_candidates) and not has_compat_vdf:
                 return False
         elif not has_compat_vdf:
             return False
