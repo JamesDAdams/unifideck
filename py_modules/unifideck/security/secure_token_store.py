@@ -62,13 +62,21 @@ import os
 import time
 from typing import Any
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
-
 from .device_identity import DeviceIdentity, DeviceIdentityError
 
 logger = logging.getLogger(__name__)
+
+try:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    _CRYPTOGRAPHY_AVAILABLE = True
+except (ImportError, OSError) as _crypto_err:
+    InvalidTag = Exception  # type: ignore[assignment,misc]
+    AESGCM = None  # type: ignore[assignment,misc]
+    Scrypt = None  # type: ignore[assignment,misc]
+    _CRYPTOGRAPHY_AVAILABLE = False
+    logger.warning("[SecureTokenStore] cryptography backend unavailable: %s", _crypto_err)
 
 # Magic header that identifies a Unifideck-encrypted file.
 # "UFD" + format version 1. If we ever change the format
@@ -269,6 +277,8 @@ class SecureTokenStore:
         """
         if self._key is not None:
             return self._key
+        if not _CRYPTOGRAPHY_AVAILABLE or Scrypt is None:
+            raise SecureTokenStoreError("cryptography library unavailable")
         try:
             mid = self._device_identity.read()
         except DeviceIdentityError as e:
@@ -300,6 +310,8 @@ class SecureTokenStore:
         not a runtime condition).
         """
         key = self._get_key()
+        if not _CRYPTOGRAPHY_AVAILABLE or AESGCM is None:
+            raise SecureTokenStoreError("cryptography library unavailable")
         nonce = os.urandom(_NONCE_SIZE)
         aesgcm = AESGCM(key)
         ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data=None)
@@ -338,6 +350,8 @@ class SecureTokenStore:
         nonce = blob[len(_MAGIC):len(_MAGIC) + _NONCE_SIZE]
         ciphertext = blob[len(_MAGIC) + _NONCE_SIZE:]
         key = self._get_key()
+        if not _CRYPTOGRAPHY_AVAILABLE or AESGCM is None:
+            raise SecureTokenStoreError("cryptography library unavailable")
         aesgcm = AESGCM(key)
         try:
             plaintext = aesgcm.decrypt(nonce, ciphertext, associated_data=None)

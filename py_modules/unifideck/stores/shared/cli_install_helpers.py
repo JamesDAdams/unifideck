@@ -280,13 +280,19 @@ async def _settle(proc: Any, grace_s: float) -> None:
 
 def _pid_alive(pid: int) -> bool:
     """True while ``pid`` still exists (zombies count as gone)."""
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.exists():
+        try:
+            stat = proc_stat.read_text()
+            fields = stat.rpartition(")")[2].split()
+            return bool(fields) and fields[0] != "Z"
+        except OSError:
+            return False
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, OSError):
         return False
-    # " (name) S rest" — state is the field after the closing paren.
-    fields = stat.rpartition(")")[2].split()
-    return bool(fields) and fields[0] != "Z"
 
 
 async def wait_with_timeout(

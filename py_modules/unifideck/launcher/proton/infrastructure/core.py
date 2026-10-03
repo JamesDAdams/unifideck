@@ -347,6 +347,15 @@ def _apply_compat_paths(
     # Let DXVK-NVAPI work on non-NVIDIA / mixed driver setups (harmless
     # on the Deck's AMD GPU; required by some titles' NVAPI probes).
     env["DXVK_NVAPI_ALLOW_OTHER_DRIVERS"] = "1"
+
+    # Forward work_dir and unifideck configs to pressure-vessel
+    existing_rw = env.get("PRESSURE_VESSEL_FILESYSTEMS_RW", "")
+    needed_rw = [str(work_dir), str(Path("~/.config/unifideck").expanduser())]
+    current_rw = existing_rw.split(":") if existing_rw else []
+    for p in needed_rw:
+        if p and p not in current_rw:
+            current_rw.append(p)
+    env["PRESSURE_VESSEL_FILESYSTEMS_RW"] = ":".join(current_rw)
     # NOTE: the Steam identity block (SteamGameId / STEAM_COMPAT_APP_ID /
     # SteamAppId / UMU_STEAM_GAME_ID) is NOT set here. ``build_steam_window_env``
     # in the caller is its one implementation. An earlier version of this merge
