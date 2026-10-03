@@ -11,6 +11,8 @@ reads the ``Wow6432Node`` redirect — which was empty → "not installed".
 """
 from __future__ import annotations
 
+import logging
+
 from unifideck.launcher.proton.compat.gog_setup import scripts
 
 _FNV_SUBKEY = "Software\\Bethesda Softworks\\FalloutNV"
@@ -223,8 +225,66 @@ async def test_apply_script_registry_uses_batch_regedit(tmp_path, monkeypatch) -
     await scripts.apply_script_registry(plan, "1909524379", "/games/coj")
 
     assert len(calls) == 1
-    assert calls[0][0] == "regedit.exe"
+    # Bare ``regedit`` — the form proven to work elsewhere in this package
+    # (``compat/vcruntime.py`` imports its bundled .reg the same way, and
+    # ``redist.py`` drives ``msiexec``/``winetricks`` by bare name). Pinned
+    # so the batch path cannot drift back to a per-key ``reg.exe`` loop.
+    assert calls[0][0] == "regedit"
     assert calls[0][1][0] == "/S"
     assert "Z:\\" in calls[0][1][1]
 
 
+async def test_apply_script_registry_warns_when_batch_fails(
+    tmp_path, monkeypatch, caplog,
+) -> None:
+    """A failed batch import must WARN and still fall back to reg.exe.
+
+    Regression: ``run_wine`` reports failure by returning ``False``, not by
+    raising. The old code only logged inside the ``except`` branch, so a
+    batch regedit that umu refused to resolve (``Executable not found``)
+    fell through to the per-key loop with NO log line at all — the field
+    log showed 30 ``reg.exe`` spawns with nothing explaining why the fast
+    path had been abandoned.
+    """
+    calls: list[tuple[str, list[str]]] = []
+
+    async def fake_run_wine(_plan, exe, args):
+        calls.append((exe, list(args)))
+        return exe != "regedit"
+
+    monkeypatch.setattr(scripts, "run_wine", fake_run_wine)
+    monkeypatch.setattr(
+        scripts,
+        "_load_script_actions",
+        lambda _p, _g: [
+            (
+                "goggame-1909524379.script",
+                [
+                    {
+                        "install": {
+                            "action": "setRegistry",
+                            "arguments": {
+                                "root": "HKLM",
+                                "subkey": "Software\\Techland\\CallOfJuarez",
+                                "valueName": "Path",
+                                "valueType": "string",
+                                "valueData": "{app}",
+                            },
+                        },
+                    },
+                ],
+            ),
+        ],
+    )
+
+    from types import SimpleNamespace
+    plan = SimpleNamespace(prefix_path=tmp_path)
+    with caplog.at_level(logging.WARNING, logger=scripts.__name__):
+        await scripts.apply_script_registry(plan, "1909524379", "/games/coj")
+
+    assert any(
+        "batch regedit failed" in r.getMessage() for r in caplog.records
+    ), "a failed batch import must be reported, not silently degraded"
+    # Fallback still ran: one regedit attempt + reg.exe writes afterwards.
+    assert calls[0][0] == "regedit"
+    assert any(exe == "reg.exe" for exe, _a in calls)
