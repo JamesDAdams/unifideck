@@ -329,3 +329,86 @@ async def test_launch_context_steam_app_id_none_without_games_map_row():
     assert not has_entry and app_id == 0
     ctx = D._game_context("microsoft", "gid", "/x/y.exe", work_dir, "", app_id)
     assert ctx.steam_app_id is None
+
+
+# ── ARM64 default Proton selection ────────────────────────────────────
+
+
+def test_default_latest_ge_prefers_proton_experimental_on_arm64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """On ARM64 systems, _default_latest_ge() must prefer native Proton Experimental
+
+    over x86_64 GE-Proton, because GE-Proton cannot run 32-bit DirectX games on ARM64.
+    """
+    from unifideck.core import arch
+    from unifideck.launcher.proton.infrastructure import ge_marker
+
+    # Mock is_arm to True
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
+
+    # Mock Proton Experimental (ARM64) installed in steam library
+    common = tmp_path / "steamapps" / "common"
+    exp = common / "Proton Experimental (ARM64)"
+    (exp / "files" / "bin-arm64").mkdir(parents=True)
+    (exp / "proton").write_text("#!/bin/sh\n")
+    (exp / "proton").chmod(0o755)
+    (exp / "files" / "bin-arm64" / "wine").write_text("")
+    (exp / "version").write_text("1.0\n")
+    (exp / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    # Mock cached GE-Proton present too (to verify ARM64 overrides it)
+    ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (ge_dir / "files" / "bin").mkdir(parents=True)
+    (ge_dir / "proton").write_text("#!/bin/sh\n")
+    (ge_dir / "proton").chmod(0o755)
+    (ge_dir / "files" / "bin" / "wine").write_text("")
+    (ge_dir / "version").write_text("1.0\n")
+    (ge_dir / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    monkeypatch.setattr(ge_marker, "read_cached_latest_tag", lambda: "GE-Proton11-7")
+    monkeypatch.setattr(S.ge_installer, "installed_ge_proton_path", lambda tag: ge_dir / "proton")
+    monkeypatch.setattr(S, "STEAM_LIBRARY_ROOTS", [str(common)])
+    monkeypatch.setattr(S, "_compat_tool_roots", lambda: [tmp_path / "compatibilitytools.d"])
+    monkeypatch.setattr(S, "_discovered_library_commons", lambda: [])
+
+    tried: list[str] = []
+    path, tool_id = S._default_latest_ge(tried)
+
+    assert tool_id == "proton_experimental"
+    assert path == exp / "proton"
+    assert "arm64-default:proton_experimental" in tried
+
+
+def test_default_latest_ge_prefers_ge_on_x86_64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """On x86_64 systems, _default_latest_ge() preserves standard GE-Proton preference."""
+    from unifideck.core import arch
+    from unifideck.launcher.proton.infrastructure import ge_marker
+
+    # Mock is_arm to False (x86_64)
+    monkeypatch.setattr(arch, "is_arm", lambda: False)
+
+    # Mock cached GE-Proton present
+    ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (ge_dir / "files" / "bin").mkdir(parents=True)
+    (ge_dir / "proton").write_text("#!/bin/sh\n")
+    (ge_dir / "proton").chmod(0o755)
+    (ge_dir / "files" / "bin" / "wine").write_text("")
+    (ge_dir / "version").write_text("1.0\n")
+    (ge_dir / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    monkeypatch.setattr(ge_marker, "read_cached_latest_tag", lambda: "GE-Proton11-7")
+    monkeypatch.setattr(S.ge_installer, "installed_ge_proton_path", lambda tag: ge_dir / "proton")
+    monkeypatch.setattr(S, "STEAM_LIBRARY_ROOTS", [])
+    monkeypatch.setattr(S, "_compat_tool_roots", lambda: [tmp_path / "compatibilitytools.d"])
+    monkeypatch.setattr(S, "_discovered_library_commons", lambda: [])
+
+    tried: list[str] = []
+    path, tool_id = S._default_latest_ge(tried)
+
+    assert tool_id == "GE-Proton11-7"
+    assert path == ge_dir / "proton"
+    assert "latest-ge-cached:GE-Proton11-7" in tried
+

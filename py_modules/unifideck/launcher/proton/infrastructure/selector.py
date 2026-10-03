@@ -415,6 +415,22 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     4. Fallback — Proton Experimental (the only fallback by design;
        older local GE versions stay user-selectable via Force Compat).
     """
+    from unifideck.core.arch import is_arm
+
+    # On ARM64 hosts (Snapdragon / SteamOS ARM64), GE-Proton builds are x86_64
+    # only and cannot run 32-bit DirectX titles (missing 32-bit Vulkan thunking).
+    # Prefer an installed, complete native Proton Experimental build by default.
+    if is_arm():
+        experimental = resolve_proton_path("proton_experimental")
+        if experimental and ge_installer.is_proton_install_complete(experimental):
+            tried.append("arm64-default:proton_experimental")
+            logger.info(
+                "[launcher.proton] ARM64 host: defaulting to native "
+                "Proton Experimental (%s)",
+                experimental.parent.name,
+            )
+            return experimental, "proton_experimental"
+
     external = external_ge.find_external_ge_proton()
     cached = ge_marker.read_cached_latest_tag()
     cached_path = ge_installer.installed_ge_proton_path(cached) if cached else None
