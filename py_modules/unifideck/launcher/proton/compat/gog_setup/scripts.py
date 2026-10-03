@@ -33,18 +33,25 @@ _TYPE_MAP = {
 }
 
 
+def _win_path(install_path: str) -> str:
+    """Map a Linux install path to its Wine ``Z:`` path for ``{app}``."""
+    return "Z:" + install_path.replace("/", "\\")
+
+
 def _setup_args(
     manifest: dict[str, Any], product_id: str, install_path: str, lang: str,
 ) -> list[str]:
     """Build the GOG silent-setup arg list (Heroic setup.ts)."""
     name = language_name(lang)
+    win_install = _win_path(install_path)
+    win_support = _win_path(str(SUPPORT_DIR / product_id))
     return [
-        "/VERYSILENT", f"/DIR={install_path}",
+        "/VERYSILENT", f"/DIR={win_install}",
         f"/Language={name}", f"/LANG={name}",
         f"/ProductId={product_id}", "/galaxyclient",
         f"/buildId={manifest.get('buildId', '0')}",
         f"/versionName={manifest.get('version_name', '1.0')}",
-        f"/lang-code={lang}", f"/supportDir={SUPPORT_DIR / product_id}",
+        f"/lang-code={lang}", f"/supportDir={win_support}",
         "/nodesktopshorctut", "/nodesktopshortcut",  # GOG's own typo + correct
     ]
 
@@ -86,11 +93,6 @@ async def run_temp_executable(
         await run_wine(
             plan, str(exe), _setup_args(manifest, pid, install_path, lang),
         )
-
-
-def _win_path(install_path: str) -> str:
-    """Map a Linux install path to its Wine ``Z:`` path for ``{app}``."""
-    return "Z:" + install_path.replace("/", "\\")
 
 
 def _wow64_subkeys(root: str, subkey: str) -> list[str]:

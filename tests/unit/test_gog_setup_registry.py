@@ -100,3 +100,32 @@ async def test_apply_set_registry_noop_without_root_or_subkey(monkeypatch) -> No
     await scripts._apply_set_registry(None, {"subkey": "Software\\X"}, "/x")
     await scripts._apply_set_registry(None, {"root": "HKLM"}, "/x")
     assert calls == []
+
+
+# ── _setup_args (InnoSetup argument formatting) ────────────────────────
+
+
+def test_setup_args_formats_windows_paths_for_innosetup() -> None:
+    """InnoSetup (scriptinterpreter.exe) runs under Wine and requires Windows Z: paths.
+
+    Passing raw Linux paths (/DIR=/var/home/...) causes InnoSetup to fail
+    with a 'Path not found' popup dialog.
+    """
+    manifest = {
+        "buildId": "51721132362920919",
+        "version_name": "1.1",
+    }
+    args = scripts._setup_args(
+        manifest,
+        product_id="1909524379",
+        install_path="/var/home/armada/Games/Call of Juarez",
+        lang="en-US",
+    )
+    assert "/VERYSILENT" in args
+    dir_arg = next(a for a in args if a.startswith("/DIR="))
+    assert dir_arg == r"/DIR=Z:\var\home\armada\Games\Call of Juarez"
+
+    support_arg = next(a for a in args if a.startswith("/supportDir="))
+    assert support_arg.startswith("/supportDir=Z:\\")
+    assert "1909524379" in support_arg
+
