@@ -35,6 +35,16 @@ SUPPORT_DIR = _CFG / "gogdl" / "gog-support"
 # in ``compat/gog.py``; this is now the single definition both import.
 AUTH_CONFIG = _CFG / "gogdl_auth.json"
 
+#: Default wall-clock budget for one GOG setup helper, in seconds.
+#: Set from the field bundle rather than guessed: ``scriptinterpreter.exe``
+#: sat for 35 minutes without progressing and the game never launched, so
+#: the old unbounded wait had no upper bound worth defending. Ten minutes is
+#: far longer than any healthy silent-setup helper needs (the observed
+#: successful ones finish in seconds) and far shorter than a user will sit
+#: watching a dead game — and, unlike the old behaviour, it ends with the
+#: launch continuing rather than with a cancelled one.
+SETUP_TIMEOUT_S = 600.0
+
 _LANG_MAP = {
     "en": "english", "de": "german", "fr": "french", "es": "spanish",
     "it": "italian", "pt": "portuguese", "ru": "russian", "pl": "polish",
@@ -124,6 +134,7 @@ def cast_dict(value: Any) -> dict[str, Any] | None:
 
 async def run_wine(
     plan: ProtonLaunchPlan, exe: str, args: list[str],
+    *, timeout_s: float | None = None,
 ) -> bool:
     """Run a Windows exe in the game's prefix via umu. True on rc 0.
 
@@ -131,11 +142,25 @@ async def run_wine(
     the umu spawn for every prefix-setup step and carries the reason none of
     them may call a Proton's ``wine`` directly.
 
-    This is the one setup site with an unbounded wait — no timeout, no retry,
-    no wineserver reap — so anything that wedges a helper here wedges the
-    launch outright rather than costing a timeout budget. GOG's setup steps
-    are full Windows installers and a bounded wait would cut them off inside
-    a prefix; the registry writers, which are quick and sit on the launch hot
-    path, pass a timeout instead.
+    ``timeout_s`` is optional so the *installer* steps can still be given
+    room, but it now defaults to :data:`SETUP_TIMEOUT_S` instead of waiting
+    forever. That default used to be ``None`` — "wait indefinitely" — and it
+    was the only setup site in the launcher with no bound at all. Field
+    bundle (2026-10-03, SteamOS ARM64, Saints Row - Gat Out of Hell): one
+    Play press produced two ``scriptinterpreter.exe`` runs 35 minutes apart,
+    the game executable never spawned, and the user cancelled. The helper
+    had not crashed — it had stopped making progress, and nothing in the
+    launch path was going to notice.
+
+    Generous on purpose: these really are full Windows installers writing
+    into a prefix, and cutting one off mid-write is worse than waiting. But
+    bounded, so a wedged helper costs this many seconds rather than the
+    whole session — and because ``run_setup_exe`` kills the process group
+    on expiry, the prefix is not left holding a live wineserver either.
     """
-    return await run_setup_exe(plan, exe, args, store="gog", label="gog_setup")
+    return await run_setup_exe(
+        plan, exe, args,
+        store="gog",
+        timeout_s=SETUP_TIMEOUT_S if timeout_s is None else timeout_s,
+        label="gog_setup",
+    )

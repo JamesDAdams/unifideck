@@ -129,16 +129,36 @@ async def _run_setup_scripts(
     install_path: str,
     language: str,
 ) -> None:
-    """Run the v2 scriptInterpreter / temp-executable setup step, if any."""
+    """Run the v2 scriptInterpreter / temp-executable setup step, if any.
+
+    Wrapped so a failure here cannot take the launch down with it. The
+    module's contract is "failures log and never block the launch" — true
+    of every *reported* failure (``run_wine`` returns False and the caller
+    carries on) but not of an *exception*. ``scriptinterpreter.exe`` is a
+    third-party Windows binary handed a path that may contain spaces; an
+    OSError or Wine-level crash escaping here propagated straight out of
+    ``apply_gog_setup`` and aborted the launch before the game exe was ever
+    spawned.
+
+    The timing half of the same failure is bounded by
+    :data:`common.SETUP_TIMEOUT_S`: field bundle 2026-10-03 showed this same
+    helper sitting for 35 minutes before it returned at all.
+    """
     if manifest.get("version") != 2:
         return
-    if manifest.get("scriptInterpreter"):
-        await run_script_interpreter(
-            plan, game_id, manifest, install_path, language,
-        )
-    else:
-        await run_temp_executable(
-            plan, game_id, manifest, install_path, language,
+    try:
+        if manifest.get("scriptInterpreter"):
+            await run_script_interpreter(
+                plan, game_id, manifest, install_path, language,
+            )
+        else:
+            await run_temp_executable(
+                plan, game_id, manifest, install_path, language,
+            )
+    except Exception:
+        logger.exception(
+            "[gog_setup] setup script failed for %s — continuing to the game",
+            game_id,
         )
 
 
@@ -152,7 +172,17 @@ async def _install_redists(plan: ProtonLaunchPlan, deps: list[str]) -> bool:
     if redist_manifest is None:
         logger.warning("[gog_setup] no redist manifest found")
         return False
-    await install_redistributables(plan, deps, redist_manifest)
+    try:
+        await install_redistributables(plan, deps, redist_manifest)
+    except Exception:
+        # Same reasoning as ``_run_setup_scripts``: an exception escaping a
+        # setup step must not abort the launch. Report it as "incomplete"
+        # so the marker stays unwritten and the next launch retries.
+        logger.exception(
+            "[gog_setup] redistributable install failed for %s — leaving "
+            "marker unwritten so the next launch retries", deps,
+        )
+        return False
     return True
 
 
