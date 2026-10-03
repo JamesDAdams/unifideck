@@ -42,6 +42,23 @@ def _missing_deps(all_deps: list[str]) -> list[str]:
     ]
 
 
+_REDIST_DONE_MARKER = REDIST_DIR / ".unifideck-redist-done"
+
+
+def _redist_installed() -> bool:
+    """True if a previous run completed the redist install."""
+    return _REDIST_DONE_MARKER.is_file()
+
+
+def _mark_redist_done() -> None:
+    """Record that the redist install completed successfully."""
+    try:
+        _REDIST_DONE_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        _REDIST_DONE_MARKER.write_text("done", encoding="utf-8")
+    except OSError:
+        pass
+
+
 async def ensure_redist_downloaded(
     plan: ProtonLaunchPlan, deps: list[str],
 ) -> bool:
@@ -51,16 +68,21 @@ async def ensure_redist_downloaded(
     afterwards, so the caller can decline to write its "done" marker and
     retry next launch instead of latching a failure forever.
     """
+    if _redist_installed():
+        logger.info("[gog_setup] redist already installed (marker present)")
+        return True
+
     all_deps = ["ISI"] + [d for d in deps if d != "ISI"]
     REDIST_DIR.mkdir(parents=True, exist_ok=True)
     missing = _missing_deps(all_deps)
     if not missing:
         logger.info("[gog_setup] all redistributables already present")
+        _mark_redist_done()
         return True
 
     launcher_toast(
         "toasts.launcher.installingRedistMessage",
-        i18n_title_key="toasts.launcher.installingRedist",
+        i8n_title_key="toasts.launcher.installingRedist",
         game_title=plan.context.game_key,
     )
     gogdl = _gogdl_bin(plan)
@@ -71,15 +93,12 @@ async def ensure_redist_downloaded(
         )
         return False
 
-    # Serialise downloads across concurrent launches with a file lock.
     lock_path = REDIST_DIR / ".download.lock"
     with lock_path.open("w") as lock:
         with contextlib.suppress(OSError):
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         await _run_redist_download(gogdl, missing)
 
-    # gogdl's exit code alone is not proof it wrote anything — re-check the
-    # tree it was supposed to fill before declaring the deps satisfied.
     still_missing = _missing_deps(all_deps)
     if still_missing:
         logger.warning(
@@ -87,6 +106,7 @@ async def ensure_redist_downloaded(
             ", ".join(still_missing),
         )
         return False
+    _mark_redist_done()
     return True
 
 

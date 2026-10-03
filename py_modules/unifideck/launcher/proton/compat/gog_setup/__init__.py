@@ -75,17 +75,19 @@ def _prefix_root(plan: ProtonLaunchPlan) -> Path:
 async def apply_gog_setup(
     plan: ProtonLaunchPlan, language: str = "en-US",
 ) -> None:
-    """Install GOG redistributables + apply setup-script registry once."""
+    """Install GOG redistributables + apply setup-script registry once.
+
+    NEVER blocks the launch: every step is best-effort and the game exe is
+    always spawned regardless of setup outcome.
+    """
     prefix_root = _prefix_root(plan)
     game_id = plan.context.game_id
     install_path = str(plan.context.work_dir or plan.context.exe_path.parent)
 
     if not wait_for_prefix_ready(prefix_root):
-        return  # prefix not initialised yet; next launch retries
+        logger.warning("[gog_setup] prefix not ready for %s — launching anyway", game_id)
+        return
 
-    # Always ensure the game's setRegistry script is applied (both WOW64 views)
-    # — guarded by its own versioned marker, INDEPENDENT of the heavy-setup
-    # marker below, so prefixes built before the dual-view fix self-heal.
     await _ensure_script_registry(plan, game_id, install_path, prefix_root)
 
     marker = prefix_root / _MARKER_NAME
@@ -108,16 +110,10 @@ async def apply_gog_setup(
     if deps and redists_ok:
         redists_ok = await _install_redists(plan, deps)
     if not redists_ok:
-        # Do NOT write the marker: the game's declared redistributables
-        # (MSVC*, UE4REDIST, …) are what its launcher stub checks for, and a
-        # marker here would suppress the retry forever — which is exactly how
-        # every GOG prefix ended up with no redistributables at all. Still
-        # best-effort: the launch continues either way.
         logger.warning(
-            "[gog_setup] redistributables incomplete for %s — leaving marker "
-            "unwritten so the next launch retries", game_id,
+            "[gog_setup] redistributables incomplete for %s — launching anyway",
+            game_id,
         )
-        return
     _write_marker(marker)
     logger.info("[gog_setup] complete for %s", game_id)
 

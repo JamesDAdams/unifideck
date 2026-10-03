@@ -88,7 +88,8 @@ def test_get_latest_ge_tag_network_failure_returns_none():
 
 # ── ge_installer._select_tarball ───────────────────────────────────
 
-def test_select_tarball_ignores_aarch64_and_prefers_exact_tag():
+def test_select_tarball_ignores_aarch64_and_prefers_exact_tag(monkeypatch):
+    monkeypatch.setattr("unifideck.launcher.proton.infrastructure.ge_installer.get_arch_name", lambda: "x86_64")
     assets = [
         {"name": "GE-Proton11-1-aarch64.sha512sum", "browser_download_url": "http://example.com/arm.sha"},
         {"name": "GE-Proton11-1-aarch64.tar.gz", "browser_download_url": "http://example.com/arm.tar.gz"},
@@ -99,7 +100,8 @@ def test_select_tarball_ignores_aarch64_and_prefers_exact_tag():
     assert url == "http://example.com/x86.tar.gz"
 
 
-def test_select_tarball_fallback_without_tag():
+def test_select_tarball_fallback_without_tag(monkeypatch):
+    monkeypatch.setattr("unifideck.launcher.proton.infrastructure.ge_installer.get_arch_name", lambda: "x86_64")
     assets = [
         {"name": "GE-Proton11-1-aarch64.tar.gz", "browser_download_url": "http://example.com/arm.tar.gz"},
         {"name": "GE-Proton11-1.tar.gz", "browser_download_url": "http://example.com/x86.tar.gz"},

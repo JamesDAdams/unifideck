@@ -38,12 +38,12 @@ AUTH_CONFIG = _CFG / "gogdl_auth.json"
 #: Default wall-clock budget for one GOG setup helper, in seconds.
 #: Set from the field bundle rather than guessed: ``scriptinterpreter.exe``
 #: sat for 35 minutes without progressing and the game never launched, so
-#: the old unbounded wait had no upper bound worth defending. Ten minutes is
-#: far longer than any healthy silent-setup helper needs (the observed
+#: the old unbounded wait had no upper bound worth defending. Sixty seconds
+#: is far longer than any healthy silent-setup helper needs (the observed
 #: successful ones finish in seconds) and far shorter than a user will sit
 #: watching a dead game — and, unlike the old behaviour, it ends with the
 #: launch continuing rather than with a cancelled one.
-SETUP_TIMEOUT_S = 600.0
+SETUP_TIMEOUT_S = 60.0
 
 _LANG_MAP = {
     "en": "english", "de": "german", "fr": "french", "es": "spanish",

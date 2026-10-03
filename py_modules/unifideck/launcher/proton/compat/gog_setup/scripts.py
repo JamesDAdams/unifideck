@@ -230,7 +230,13 @@ def _load_script_actions(
 async def apply_script_registry(
     plan: ProtonLaunchPlan, game_id: str, install_path: str,
 ) -> None:
-    """Apply ``goggame-*.script`` setRegistry actions to the prefix."""
+    """Apply ``goggame-*.script`` setRegistry actions to the prefix.
+
+    Reads the script's setRegistry actions, generates a .reg file, applies it
+    with ``regedit /S``, then deletes the .reg. Handles ``{app}`` expansion
+    and writes to both ``HKLM\\Software\\…`` and
+    ``HKLM\\Software\\Wow6432Node\\…`` views. NEVER logs the serial number.
+    """
     parsed = await asyncio.to_thread(
         _load_script_actions, install_path, game_id,
     )
@@ -242,12 +248,6 @@ async def apply_script_registry(
         reg_file = Path(plan.prefix_path) / f".unifideck_gog_script_{game_id}.reg"
         try:
             reg_file.write_text(reg_content, encoding="utf-8")
-            # Bare ``regedit``, matching the form proven to work elsewhere in
-            # this package: ``compat/vcruntime.py`` imports its bundled .reg
-            # with a bare ``regedit``, and ``redist.py`` drives ``msiexec`` /
-            # ``winetricks`` by bare name too. ``_apply_set_registry`` below
-            # keeps ``reg.exe`` only because that name is load-bearing in
-            # Wine's own ``reg`` shim. One call here, not one-process-per-key.
             ok = await run_wine(
                 plan, "regedit", ["/S", _win_path(str(reg_file))],
             )
@@ -256,12 +256,6 @@ async def apply_script_registry(
                     "[gog_setup] batch script registry imported for %s", game_id,
                 )
                 return
-            # ``run_wine`` signals failure by RETURNING False, not by raising,
-            # so this branch is the ONLY place a refused batch import is
-            # reported. Without it the step degraded to the slow per-key path
-            # with nothing in the log to say why (field log: 30 ``reg.exe``
-            # spawns and no reason given). The ``except`` below covers the
-            # rarer path where the write/spawn raises instead.
             logger.warning(
                 "[gog_setup] batch regedit failed for %s — falling back to reg.exe",
                 game_id,
@@ -285,4 +279,3 @@ async def apply_script_registry(
                 await _apply_set_registry(
                     plan, install.get("arguments", {}) or {}, install_path,
                 )
-            # 'Execute' actions intentionally skipped (headless hang risk).
