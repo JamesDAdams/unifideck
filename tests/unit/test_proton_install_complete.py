@@ -26,6 +26,7 @@ def _make_proton(
     root, *, exe=True, files=True, wine=True, wine64=False,
     wine_bin_arm64=False, compat_vdf=None,
     version="1.0", manifest=_VALID_MANIFEST,
+    protonfixes=False,
 ):
     """Build a Proton tool dir; return the ``proton`` script path.
 
@@ -68,6 +69,12 @@ def _make_proton(
     # Every official Steam Proton ships a zero-byte dist.lock — assert it
     # does NOT trip the check (it is a normal per-tool lock, not corruption).
     (root / "dist.lock").write_text("")
+    # ``protonfixes/`` is what umu's ``run_command`` chdirs into
+    # (``cwd=PROTONPATH/protonfixes``); GE-Proton / UMU-Proton / community
+    # builds bundle it, official Valve Protons do not. Opt-in so tests can
+    # model either shape.
+    if protonfixes:
+        (root / "protonfixes").mkdir(exist_ok=True)
     return proton
 
 
@@ -222,7 +229,7 @@ def test_resolve_logged_skips_incomplete_install(tmp_path, monkeypatch):
 
 
 def test_resolve_logged_returns_complete_install(tmp_path, monkeypatch):
-    good = _make_proton(tmp_path / "Proton - Experimental")
+    good = _make_proton(tmp_path / "Proton - Experimental", protonfixes=True)
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: good)
 
     tried: list[str] = []
@@ -231,11 +238,36 @@ def test_resolve_logged_returns_complete_install(tmp_path, monkeypatch):
     assert result == good
 
 
+def test_resolve_logged_skips_valve_proton_without_protonfixes(
+    tmp_path, monkeypatch,
+):
+    """A structurally-complete Valve Proton with no ``protonfixes/`` is skipped.
+
+    Regression (0.7.6, gog:1909524379 Call of Juarez): the native ARM64 Proton
+    Experimental ships no ``protonfixes/`` and umu's ``run_command`` does
+    ``cwd=PROTONPATH/protonfixes``, so returning it made every launch die with
+    ``FileNotFoundError`` before the first Windows process. A saved / per-app /
+    distro-default choice pointing at it must fall through to GE-Proton.
+    """
+    bare_valve = _make_proton(
+        tmp_path / "Proton Experimental (ARM64)",
+        wine=False, wine64=False, wine_bin_arm64=True,
+        protonfixes=False,
+    )
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: bare_valve)
+
+    tried: list[str] = []
+    result = selector._resolve_logged("steam", "proton_experimental", tried)
+
+    assert result is None
+
+
 def test_resolve_logged_accepts_arm64_proton_experimental(tmp_path, monkeypatch):
     arm64_exp = _make_proton(
         tmp_path / "Proton Experimental (ARM64)",
         wine=False,
         wine64=True,
+        protonfixes=True,
     )
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: arm64_exp)
 
@@ -260,6 +292,7 @@ def test_resolve_logged_accepts_real_arm64_proton_experimental_layout(
         wine=False,
         wine64=False,
         wine_bin_arm64=True,
+        protonfixes=True,
     )
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: arm64_exp)
 
@@ -270,9 +303,12 @@ def test_resolve_logged_accepts_real_arm64_proton_experimental_layout(
 
 
 def test_resolve_logged_accepts_distro_cachyos_proton(tmp_path, monkeypatch):
+    # ``proton-cachyos`` is a community build that bundles protonfixes/, so
+    # the Valve-only protonfixes guard must not touch it.
     cachy = _make_proton(
         tmp_path / "proton-cachyos-11.0-arm64",
         files=False,
+        protonfixes=True,
         compat_vdf='"compatibilitytools" {}',
     )
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: cachy)

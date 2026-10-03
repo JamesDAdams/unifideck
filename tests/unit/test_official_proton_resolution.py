@@ -334,20 +334,28 @@ async def test_launch_context_steam_app_id_none_without_games_map_row():
 # ── ARM64 default Proton selection ────────────────────────────────────
 
 
-def test_default_latest_ge_prefers_proton_experimental_on_arm64(
+def test_default_latest_ge_skips_arm64_experimental_without_protonfixes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """On ARM64 systems, _default_latest_ge() must prefer native Proton Experimental
+    """On ARM64 the native Proton Experimental is only preferred when umu can
+    actually drive it.
 
-    over x86_64 GE-Proton, because GE-Proton cannot run 32-bit DirectX games on ARM64.
+    Field regression (0.7.6, SteamOS ARM64, gog:1909524379 Call of Juarez):
+    forcing ``Proton Experimental (ARM64)`` made the game NEVER launch. umu's
+    ``run_command`` sets ``cwd=PROTONPATH/protonfixes`` for every command, and
+    the native ARM64 Proton ships no ``protonfixes/`` — so each umu invocation
+    died with ``FileNotFoundError: .../Proton Experimental (ARM64)/protonfixes``
+    and the launch hung until cancelled. GE-Proton bundles ``protonfixes/``,
+    so on a host where the ARM64 Experimental lacks it the selector must fall
+    through to GE-Proton rather than hand umu a Proton it cannot run.
     """
     from unifideck.core import arch
     from unifideck.launcher.proton.infrastructure import ge_marker
 
-    # Mock is_arm to True
     monkeypatch.setattr(arch, "is_arm", lambda: True)
 
-    # Mock Proton Experimental (ARM64) installed in steam library
+    # Native ARM64 Proton Experimental: complete, but NO protonfixes/ (the
+    # real layout on device — official Valve Protons don't ship it).
     common = tmp_path / "steamapps" / "common"
     exp = common / "Proton Experimental (ARM64)"
     (exp / "files" / "bin-arm64").mkdir(parents=True)
@@ -357,7 +365,52 @@ def test_default_latest_ge_prefers_proton_experimental_on_arm64(
     (exp / "version").write_text("1.0\n")
     (exp / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
 
-    # Mock cached GE-Proton present too (to verify ARM64 overrides it)
+    ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (ge_dir / "files" / "bin").mkdir(parents=True)
+    (ge_dir / "proton").write_text("#!/bin/sh\n")
+    (ge_dir / "proton").chmod(0o755)
+    (ge_dir / "files" / "bin" / "wine").write_text("")
+    (ge_dir / "protonfixes").mkdir()
+    (ge_dir / "protonfixes" / "winetricks").write_text("#!/bin/sh\n")
+    (ge_dir / "version").write_text("1.0\n")
+    (ge_dir / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    monkeypatch.setattr(ge_marker, "read_cached_latest_tag", lambda: "GE-Proton11-7")
+    monkeypatch.setattr(S.ge_installer, "installed_ge_proton_path", lambda tag: ge_dir / "proton")
+    monkeypatch.setattr(S, "STEAM_LIBRARY_ROOTS", [str(common)])
+    monkeypatch.setattr(S, "_compat_tool_roots", lambda: [tmp_path / "compatibilitytools.d"])
+    monkeypatch.setattr(S, "_discovered_library_commons", lambda: [])
+
+    tried: list[str] = []
+    path, tool_id = S._default_latest_ge(tried)
+
+    assert tool_id == "GE-Proton11-7"
+    assert path == ge_dir / "proton"
+    assert "arm64-default:proton_experimental" not in tried
+
+
+def test_default_latest_ge_keeps_arm64_experimental_with_protonfixes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """The guard must not over-correct: an ARM64 Proton Experimental that DOES
+    ship ``protonfixes/`` is still preferred over GE-Proton, preserving the
+    original ARM64 intent (native 32-bit Vulkan thunking)."""
+    from unifideck.core import arch
+    from unifideck.launcher.proton.infrastructure import ge_marker
+
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
+
+    common = tmp_path / "steamapps" / "common"
+    exp = common / "Proton Experimental (ARM64)"
+    (exp / "files" / "bin-arm64").mkdir(parents=True)
+    (exp / "proton").write_text("#!/bin/sh\n")
+    (exp / "proton").chmod(0o755)
+    (exp / "files" / "bin-arm64" / "wine").write_text("")
+    (exp / "protonfixes").mkdir()
+    (exp / "protonfixes" / "winetricks").write_text("#!/bin/sh\n")
+    (exp / "version").write_text("1.0\n")
+    (exp / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
     ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
     (ge_dir / "files" / "bin").mkdir(parents=True)
     (ge_dir / "proton").write_text("#!/bin/sh\n")

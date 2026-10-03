@@ -356,6 +356,21 @@ def _resolve_logged(source: str, tool: str, tried: list[str]) -> Path | None:
             source, tool, path.parent,
         )
         return None
+    # An officially-managed Proton that is structurally complete but has no
+    # ``protonfixes/`` cannot be driven by umu (its ``run_command`` does
+    # ``cwd=PROTONPATH/protonfixes``), so a saved / per-app / distro-default
+    # choice pointing at one (e.g. the ARM64 ``proton-experimental-arm64``)
+    # would make every launch die with ``FileNotFoundError`` before the first
+    # Windows process. Skip it and fall through to the GE default rather than
+    # hand umu a Proton it cannot run. Only applied to Proton-family tools:
+    # a user's GE / UMU-Proton choice bundles ``protonfixes/`` and passes.
+    if _is_valve_proton_name(tool) and not _can_umu_drive(path):
+        logger.warning(
+            "[launcher.proton] %s tool %s (%s) has no protonfixes/ — umu "
+            "cannot run it; skipping, will fall back to GE-Proton",
+            source, tool, path.parent,
+        )
+        return None
     logger.info("[launcher.proton] selected via %s tool: %s", source, tool)
     return path
 
@@ -401,6 +416,51 @@ def _announce_ge_ready(tag: str) -> None:
         logger.debug("[launcher.proton] GE ready toast failed", exc_info=True)
 
 
+def _is_valve_proton_name(tool: str) -> bool:
+    """Whether a tool id / display name names an official Valve Proton.
+
+    Used to scope the ``protonfixes`` guard in :func:`_resolve_logged` to the
+    Protons that actually lack it, so a user's GE / UMU-Proton choice (which
+    bundles ``protonfixes/``) is never second-guessed. Matches the Steam tool
+    ids (``proton_experimental``, ``proton_9``, ``proton_hotfix`` …) and the
+    display names (``Proton - Experimental``, ``Proton Experimental (ARM64)``).
+    """
+    if not tool:
+        return False
+    lowered = tool.lower().strip()
+    if lowered.startswith(("proton_experimental", "proton_hotfix")):
+        return True
+    # ``proton_9`` / ``proton_10`` (Valve's numbered builds) but NOT
+    # ``proton-cachyos`` / ``proton-ge``-style community builds, which ship
+    # their own ``protonfixes/``.
+    if lowered.startswith("proton_") and lowered[len("proton_"):][:1].isdigit():
+        return True
+    return lowered.startswith(("proton experimental", "proton - "))
+
+
+def _can_umu_drive(proton_path: Path | None) -> bool:
+    """Whether this Proton can be driven by umu at all.
+
+    umu's ``run_command`` sets ``cwd = f"{PROTONPATH}/protonfixes"`` and execs
+    the target with that cwd (``umu_run.py``), and its winetricks verb execs
+    ``<PROTONPATH>/protonfixes/winetricks``. Official Valve Protons — including
+    the native ARM64 Proton Experimental — ship neither, so umu raises
+    ``FileNotFoundError`` before the first Windows process and the launch hangs.
+
+    Returns True when there is no path to judge, so this can only ever skip a
+    Proton that was certain to fail; it never rejects one that might work.
+    """
+    if not proton_path:
+        return True
+    try:
+        root = Path(proton_path)
+        if root.is_file():  # the ``proton`` script itself was passed
+            root = root.parent
+        return (root / "protonfixes").is_dir()
+    except OSError:
+        return True
+
+
 def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     """Default tier: external GE-Proton, latest GE-Proton online, else Experimental.
 
@@ -419,10 +479,22 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
 
     # On ARM64 hosts (Snapdragon / SteamOS ARM64), GE-Proton builds are x86_64
     # only and cannot run 32-bit DirectX titles (missing 32-bit Vulkan thunking).
-    # Prefer an installed, complete native Proton Experimental build by default.
+    # Prefer an installed, complete native Proton Experimental build by default —
+    # but ONLY when umu can actually drive it. umu's ``run_command`` does
+    # ``cwd=f"{PROTONPATH}/protonfixes"`` for every command, and the native ARM64
+    # Proton ships no ``protonfixes/``, so every umu invocation (prefix setup,
+    # winetricks, regedit, the game itself) dies with
+    # ``FileNotFoundError: .../protonfixes`` and the launch hangs until the user
+    # cancels. GE-Proton bundles ``protonfixes/``, so on such a host fall
+    # through to the GE tiers instead of handing umu a Proton it cannot run.
+    # (Field: 0.7.6, gog:1909524379 Call of Juarez — game never launched.)
     if is_arm():
         experimental = resolve_proton_path("proton_experimental")
-        if experimental and ge_installer.is_proton_install_complete(experimental):
+        if (
+            experimental
+            and ge_installer.is_proton_install_complete(experimental)
+            and _can_umu_drive(experimental)
+        ):
             tried.append("arm64-default:proton_experimental")
             logger.info(
                 "[launcher.proton] ARM64 host: defaulting to native "
@@ -430,6 +502,13 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
                 experimental.parent.name,
             )
             return experimental, "proton_experimental"
+        if experimental and ge_installer.is_proton_install_complete(experimental):
+            logger.warning(
+                "[launcher.proton] ARM64 Proton Experimental (%s) has no "
+                "protonfixes/ — umu cannot run it (cwd=PROTONPATH/protonfixes); "
+                "falling back to GE-Proton",
+                experimental.parent.name,
+            )
 
     external = external_ge.find_external_ge_proton()
     cached = ge_marker.read_cached_latest_tag()
