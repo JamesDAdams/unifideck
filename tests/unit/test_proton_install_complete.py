@@ -17,16 +17,14 @@ from __future__ import annotations
 import os
 import stat
 
-from unifideck.launcher.proton.infrastructure import ge_installer
-from unifideck.launcher.proton.infrastructure import selector
-
+from unifideck.launcher.proton.infrastructure import ge_installer, selector
 
 _VALID_MANIFEST = '"manifest"\n{\n  "commandline" "/proton run"\n}\n'
 
 
 def _make_proton(
-    root, *, exe=True, files=True, wine=True, version="1.0",
-    manifest=_VALID_MANIFEST,
+    root, *, exe=True, files=True, wine=True, wine64=False, compat_vdf=None,
+    version="1.0", manifest=_VALID_MANIFEST,
 ):
     """Build a Proton tool dir; return the ``proton`` script path.
 
@@ -45,6 +43,10 @@ def _make_proton(
         bindir.mkdir(parents=True, exist_ok=True)
         if wine:
             (bindir / "wine").write_text("")
+        if wine64:
+            (bindir / "wine64").write_text("")
+    if compat_vdf is not None:
+        (root / "compatibilitytool.vdf").write_text(compat_vdf)
     if version is not None:
         (root / "version").write_text(version)
     # Every real Proton ships a toolmanifest.vdf; umu parses it on every
@@ -123,6 +125,38 @@ def test_missing_wine_loader_fails(tmp_path):
     assert ge_installer.is_proton_install_complete(proton) is False
 
 
+def test_arm64_wine64_only_passes(tmp_path):
+    """ARM64 Proton builds (e.g. Proton Experimental ARM64) ship wine64, not wine."""
+    proton = _make_proton(
+        tmp_path / "Proton Experimental (ARM64)",
+        wine=False,
+        wine64=True,
+    )
+    assert ge_installer.is_proton_install_complete(proton) is True
+
+
+def test_distro_package_with_compatibilitytool_vdf_and_no_files_passes(tmp_path):
+    """Distro packages (e.g. proton-cachyos) without files/ pass via compatibilitytool.vdf."""
+    proton = _make_proton(
+        tmp_path / "proton-cachyos-11.0-arm64",
+        files=False,
+        compat_vdf='"compatibilitytools" {}',
+    )
+    assert ge_installer.is_proton_install_complete(proton) is True
+
+
+def test_distro_package_with_compatibilitytool_vdf_and_files_passes(tmp_path):
+    """Distro packages with compatibilitytool.vdf and files/ pass even without files/bin/wine."""
+    proton = _make_proton(
+        tmp_path / "proton-cachyos-11.0-arm64",
+        files=True,
+        wine=False,
+        wine64=False,
+        compat_vdf='"compatibilitytools" {}',
+    )
+    assert ge_installer.is_proton_install_complete(proton) is True
+
+
 def test_empty_version_fails(tmp_path):
     proton = _make_proton(tmp_path / "Proton", version="")
     assert ge_installer.is_proton_install_complete(proton) is False
@@ -150,6 +184,34 @@ def test_resolve_logged_returns_complete_install(tmp_path, monkeypatch):
     result = selector._resolve_logged("global-default", "proton_experimental", tried)
 
     assert result == good
+
+
+def test_resolve_logged_accepts_arm64_proton_experimental(tmp_path, monkeypatch):
+    arm64_exp = _make_proton(
+        tmp_path / "Proton Experimental (ARM64)",
+        wine=False,
+        wine64=True,
+    )
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: arm64_exp)
+
+    tried: list[str] = []
+    result = selector._resolve_logged("saved", "proton_experimental", tried)
+
+    assert result == arm64_exp
+
+
+def test_resolve_logged_accepts_distro_cachyos_proton(tmp_path, monkeypatch):
+    cachy = _make_proton(
+        tmp_path / "proton-cachyos-11.0-arm64",
+        files=False,
+        compat_vdf='"compatibilitytools" {}',
+    )
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: cachy)
+
+    tried: list[str] = []
+    result = selector._resolve_logged("global-default", "proton-cachyos", tried)
+
+    assert result == cachy
 
 
 def test_resolve_logged_none_when_tool_unresolved(monkeypatch):

@@ -185,9 +185,10 @@ def is_proton_install_complete(proton_script: Path) -> bool:
       ``os.access(X_OK)``" guard — a survived-partial-extract copy is
       left non-executable);
     * a ``files/`` subdir (the Wine/runtime payload) exists and is
-      non-empty, with the Wine loader (``files/bin/wine``) present —
-      the payload a hung wineserver needs and the piece a truncated
-      extract most often lacks;
+      non-empty, with the Wine loader (``files/bin/wine`` or ``files/bin/wine64``)
+      present — the payload a hung wineserver needs and the piece a truncated
+      extract most often lacks; or a distro-packaged tool with ``compatibilitytool.vdf``
+      where ``files/`` may be absent or system-provided;
     * a readable, non-empty ``version`` marker;
     * a readable, non-empty ``toolmanifest.vdf``. umu parses this file
       before it launches anything (``CompatLayer.__init__`` does
@@ -215,9 +216,15 @@ def is_proton_install_complete(proton_script: Path) -> bool:
             return False
         root = proton_script.parent
         files_dir = root / "files"
-        if not files_dir.is_dir() or not any(files_dir.iterdir()):
-            return False
-        if not (files_dir / "bin" / "wine").is_file():
+        has_compat_vdf = (root / "compatibilitytool.vdf").is_file()
+        if files_dir.is_dir():
+            if not any(files_dir.iterdir()):
+                return False
+            wine_bin = files_dir / "bin" / "wine"
+            wine64_bin = files_dir / "bin" / "wine64"
+            if not (wine_bin.is_file() or wine64_bin.is_file()) and not has_compat_vdf:
+                return False
+        elif not has_compat_vdf:
             return False
         version = root / "version"
         if not version.is_file() or version.stat().st_size == 0:
