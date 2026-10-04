@@ -238,17 +238,12 @@ def test_resolve_logged_returns_complete_install(tmp_path, monkeypatch):
     assert result == good
 
 
-def test_resolve_logged_skips_valve_proton_without_protonfixes(
+def test_resolve_logged_accepts_valve_proton_on_arm(
     tmp_path, monkeypatch,
 ):
-    """A structurally-complete Valve Proton with no ``protonfixes/`` is skipped.
-
-    Regression (0.7.6, gog:1909524379 Call of Juarez): the native ARM64 Proton
-    Experimental ships no ``protonfixes/`` and umu's ``run_command`` does
-    ``cwd=PROTONPATH/protonfixes``, so returning it made every launch die with
-    ``FileNotFoundError`` before the first Windows process. A saved / per-app /
-    distro-default choice pointing at it must fall through to GE-Proton.
-    """
+    """On ARM64, official Valve Proton is accepted even without protonfixes/."""
+    from unifideck.core import arch
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
     bare_valve = _make_proton(
         tmp_path / "Proton Experimental (ARM64)",
         wine=False, wine64=False, wine_bin_arm64=True,
@@ -259,7 +254,7 @@ def test_resolve_logged_skips_valve_proton_without_protonfixes(
     tried: list[str] = []
     result = selector._resolve_logged("steam", "proton_experimental", tried)
 
-    assert result is None
+    assert result == bare_valve
 
 
 def test_resolve_logged_accepts_arm64_proton_experimental(tmp_path, monkeypatch):

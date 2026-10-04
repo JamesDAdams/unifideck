@@ -165,21 +165,14 @@ def _point_selector_roots(tmp_path, monkeypatch):
     return compat, lib
 
 
-def test_steam_override_to_arm64_proton_without_protonfixes_falls_back(
+def test_steam_override_to_arm64_proton_without_protonfixes_honoured_on_arm(
     tmp_path, monkeypatch,
 ):
-    """A Steam per-app Force-Compat choice of ``proton-experimental-arm64``
-    must not be honoured when that Proton has no ``protonfixes/``.
-
-    Field regression (0.7.6, gog:1909524379): the appid carried a live Steam
-    override to ``proton-experimental-arm64``, so tier 1 returned the ARM64
-    Proton Experimental directly — bypassing the default-tier guard — and umu
-    died on the missing ``protonfixes`` dir, hanging the launch. The resolver
-    must skip it and fall through to managed GE-Proton instead.
-    """
+    """On ARM64, official Valve Proton (e.g. proton-experimental-arm64) is honoured
+    even without protonfixes/ via the direct SLR runner."""
+    from unifideck.core import arch
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
     _compat, lib = _point_selector_roots(tmp_path, monkeypatch)
-    # ARM64 Proton Experimental: complete (has files/bin-arm64/wine) but no
-    # protonfixes/ — exactly the on-device layout.
     exp_dir = lib / "Proton Experimental (ARM64)"
     proton = _make_proton(exp_dir, executable=True)
     (exp_dir / "files" / "bin-arm64").mkdir(parents=True)
@@ -190,26 +183,15 @@ def test_steam_override_to_arm64_proton_without_protonfixes_falls_back(
     )
     monkeypatch.setattr(
         selector, "get_steam_compat_tool_override",
-        lambda aid: "proton-experimental-arm64",
+        lambda aid: "proton_experimental",
     )
-    # GE default available.
-    ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
-    ge = _make_proton(ge_dir, executable=True)
     monkeypatch.setattr(selector, "get_saved_proton_tool", lambda gid: None)
     monkeypatch.setattr(selector, "get_unifideck_proton_tool", lambda: None)
     monkeypatch.setattr(selector, "get_global_default_tool", lambda: None)
-    monkeypatch.setattr(
-        selector.ge_marker, "read_cached_latest_tag", lambda: "GE-Proton11-7",
-    )
-    monkeypatch.setattr(
-        selector.ge_installer, "installed_ge_proton_path",
-        lambda tag: ge if tag == "GE-Proton11-7" else None,
-    )
 
     path, tool = selector.select_proton_version("4136787239", "gog:1909524379")
-    assert tool != "proton-experimental-arm64"
-    assert tool == "GE-Proton11-7"
-    assert path == ge
+    assert tool == "proton_experimental"
+    assert path == proton
 
 
 def test_resolve_proton_path_aliases_experimental(tmp_path, monkeypatch):

@@ -356,15 +356,9 @@ def _resolve_logged(source: str, tool: str, tried: list[str]) -> Path | None:
             source, tool, path.parent,
         )
         return None
-    # An officially-managed Proton that is structurally complete but has no
-    # ``protonfixes/`` cannot be driven by umu (its ``run_command`` does
-    # ``cwd=PROTONPATH/protonfixes``), so a saved / per-app / distro-default
-    # choice pointing at one (e.g. the ARM64 ``proton-experimental-arm64``)
-    # would make every launch die with ``FileNotFoundError`` before the first
-    # Windows process. Skip it and fall through to the GE default rather than
-    # hand umu a Proton it cannot run. Only applied to Proton-family tools:
-    # a user's GE / UMU-Proton choice bundles ``protonfixes/`` and passes.
-    if _is_valve_proton_name(tool) and not _can_umu_drive(path):
+    # On ARM64 hosts, if direct Valve runner or umu can drive it, accept Valve Proton.
+    from unifideck.core.arch import is_arm
+    if _is_valve_proton_name(tool) and not is_arm() and not _can_umu_drive(path):
         logger.warning(
             "[launcher.proton] %s tool %s (%s) has no protonfixes/ — umu "
             "cannot run it; skipping, will fall back to GE-Proton",
@@ -489,26 +483,17 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     # through to the GE tiers instead of handing umu a Proton it cannot run.
     # (Field: 0.7.6, gog:1909524379 Call of Juarez — game never launched.)
     if is_arm():
-        experimental = resolve_proton_path("proton_experimental")
-        if (
-            experimental
-            and ge_installer.is_proton_install_complete(experimental)
-            and _can_umu_drive(experimental)
-        ):
-            tried.append("arm64-default:proton_experimental")
-            logger.info(
-                "[launcher.proton] ARM64 host: defaulting to native "
-                "Proton Experimental (%s)",
-                experimental.parent.name,
-            )
-            return experimental, "proton_experimental"
-        if experimental and ge_installer.is_proton_install_complete(experimental):
-            logger.warning(
-                "[launcher.proton] ARM64 Proton Experimental (%s) has no "
-                "protonfixes/ — umu cannot run it (cwd=PROTONPATH/protonfixes); "
-                "falling back to GE-Proton",
-                experimental.parent.name,
-            )
+        # Look for installed Proton 11.0 (ARM64) or Proton Experimental (ARM64)
+        for cand_id in ("proton_11", "proton_experimental"):
+            cand = resolve_proton_path(cand_id)
+            if cand and ge_installer.is_proton_install_complete(cand):
+                tried.append(f"arm64-default:{cand_id}")
+                logger.info(
+                    "[launcher.proton] ARM64 host: defaulting to native "
+                    "Proton (%s)",
+                    cand.parent.name,
+                )
+                return cand, cand_id
 
     external = external_ge.find_external_ge_proton()
     cached = ge_marker.read_cached_latest_tag()

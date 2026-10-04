@@ -70,12 +70,12 @@ async def run_setup_exe(
     env = build_setup_env(plan)
     if store:
         env["STORE"] = store
+    cmd = plan.build_argv(exe, *args)
     # Escape Steam's pressure-vessel when Force-Compat wrapped us, or the
     # step nests a second container and returns rc=1 — observed as 9 straight
-    # failures in a field bundle. No-op when unwrapped.
-    cmd = escape_argv(
-        [str(plan.python_bin), str(plan.umu_wrapper), exe, *args], env, None,
-    )
+    # failures in a field bundle. No-op when unwrapped or direct runner used.
+    if not plan.runner_prefix_argv:
+        cmd = escape_argv(cmd, env, None)
     logger.info("[%s] run: %s %s", label, Path(exe).name, " ".join(args[:4]))
     try:
         proc = await asyncio.create_subprocess_exec(

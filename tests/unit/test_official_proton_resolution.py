@@ -334,28 +334,16 @@ async def test_launch_context_steam_app_id_none_without_games_map_row():
 # ── ARM64 default Proton selection ────────────────────────────────────
 
 
-def test_default_latest_ge_skips_arm64_experimental_without_protonfixes(
+def test_default_latest_ge_prefers_arm64_native_without_protonfixes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    """On ARM64 the native Proton Experimental is only preferred when umu can
-    actually drive it.
-
-    Field regression (0.7.6, SteamOS ARM64, gog:1909524379 Call of Juarez):
-    forcing ``Proton Experimental (ARM64)`` made the game NEVER launch. umu's
-    ``run_command`` sets ``cwd=PROTONPATH/protonfixes`` for every command, and
-    the native ARM64 Proton ships no ``protonfixes/`` — so each umu invocation
-    died with ``FileNotFoundError: .../Proton Experimental (ARM64)/protonfixes``
-    and the launch hung until cancelled. GE-Proton bundles ``protonfixes/``,
-    so on a host where the ARM64 Experimental lacks it the selector must fall
-    through to GE-Proton rather than hand umu a Proton it cannot run.
-    """
+    """On ARM64, official Valve Proton (e.g. Proton Experimental (ARM64)) is preferred
+    directly via the SLR direct runner even without protonfixes/."""
     from unifideck.core import arch
     from unifideck.launcher.proton.infrastructure import ge_marker
 
     monkeypatch.setattr(arch, "is_arm", lambda: True)
 
-    # Native ARM64 Proton Experimental: complete, but NO protonfixes/ (the
-    # real layout on device — official Valve Protons don't ship it).
     common = tmp_path / "steamapps" / "common"
     exp = common / "Proton Experimental (ARM64)"
     (exp / "files" / "bin-arm64").mkdir(parents=True)
@@ -384,9 +372,9 @@ def test_default_latest_ge_skips_arm64_experimental_without_protonfixes(
     tried: list[str] = []
     path, tool_id = S._default_latest_ge(tried)
 
-    assert tool_id == "GE-Proton11-7"
-    assert path == ge_dir / "proton"
-    assert "arm64-default:proton_experimental" not in tried
+    assert tool_id == "proton_experimental"
+    assert path == exp / "proton"
+    assert "arm64-default:proton_experimental" in tried
 
 
 def test_default_latest_ge_keeps_arm64_experimental_with_protonfixes(

@@ -543,9 +543,9 @@ async def _run_umu_once(
     # If Steam wrapped our launcher in its OWN pressure-vessel (the user set
     # Properties > Compatibility on this shortcut — a supported workflow),
     # hop back out to the host first: Proton's python3 cannot load libz.so.1
-    # inside steamrt and umu would exit 127. No-op when unwrapped.
-    # See container_escape for the on-device reproduction.
-    argv = escape_argv(argv, env, cwd)
+    # inside steamrt and umu would exit 127. No-op when unwrapped or already direct SLR.
+    if not any("SteamLinuxRuntime" in a or "_v2-entry-point" in a for a in argv):
+        argv = escape_argv(argv, env, cwd)
     proc = await asyncio.create_subprocess_exec(
         *argv,
         env=env,

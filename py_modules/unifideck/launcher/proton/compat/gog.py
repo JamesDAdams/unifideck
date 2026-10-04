@@ -302,10 +302,7 @@ async def _run_umu_exe(
     """
     cwd = exe_path.parent if exe_path.parent.is_dir() else None
     required_args = _read_required_launch_args(work_dir, exe_path)
-    argv: list[str] = []
-    argv.extend([str(plan.python_bin), str(plan.umu_wrapper), str(exe_path)])
-    argv.extend(required_args)
-    argv.extend(plan.state.game_args)
+    argv = plan.build_argv(exe_path, *required_args, *plan.state.game_args)
     return await run_umu_with_retry(
         argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start,
         max_attempts=max_attempts,

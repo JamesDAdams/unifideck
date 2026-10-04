@@ -84,6 +84,19 @@ class ProtonLaunchPlan:
     prefix_path: Path
     env: dict[str, str]
     on_process_start: Callable[[object], None] | None = None
+    runner_prefix_argv: list[str] | None = None
+
+    def build_argv(self, target_exe: str | Path, *extra_args: str) -> list[str]:
+        """Build command argv using direct SLR runner or standard umu wrapper."""
+        argv: list[str] = []
+        if self.runner_prefix_argv:
+            argv.extend(self.runner_prefix_argv)
+            argv.append(str(target_exe))
+            argv.extend(extra_args)
+        else:
+            argv.extend([str(self.python_bin), str(self.umu_wrapper), str(target_exe)])
+            argv.extend(extra_args)
+        return argv
 def _ubisoft_prefix_path(ctx: LaunchContext, prefixes_dir: Path) -> Path:
     """Ubisoft prefix path.
 
@@ -158,6 +171,22 @@ def _lookup_umu_id(
         return text or None
     except (subprocess.SubprocessError, OSError):
         return None
+
+def _find_arm64_slr_entry_point() -> Path | None:
+    """Find SteamLinuxRuntime_4-arm64 / SteamLinuxRuntime_4 _v2-entry-point on ARM64."""
+    from unifideck.launcher.proton.infrastructure.selector import _steam_library_commons
+    candidates = [
+        "SteamLinuxRuntime_4-arm64",
+        "SteamLinuxRuntime_4",
+        "SteamLinuxRuntime_sniper",
+    ]
+    for common_dir in _steam_library_commons():
+        for name in candidates:
+            entry = common_dir / name / "_v2-entry-point"
+            if entry.is_file() and os.access(entry, os.X_OK):
+                return entry
+    return None
+
 
 def _locate_umu_wrapper(proton_path: Path, plugin_dir: Path) -> Path:
 
@@ -501,6 +530,22 @@ def proton_prepare(
             from .gamescope_window_tagger import start_window_tagger
             start_window_tagger(appid_int)
 
+    # Direct Valve Proton on ARM64 check:
+    # If on ARM64 host, and using an official Valve Proton (which lacks protonfixes/),
+    # drive via SteamLinuxRuntime _v2-entry-point directly without umu.
+    from unifideck.core.arch import is_arm
+    runner_prefix_argv: list[str] | None = None
+    if is_arm() and ("arm64" in proton_tool_id.lower() or "arm64" in str(proton_path).lower() or "proton" in proton_tool_id.lower()):
+        slr_entry = _find_arm64_slr_entry_point()
+        if slr_entry is not None:
+            runner_prefix_argv = [
+                str(slr_entry), "--verb=run", "--", str(proton_path), "run",
+            ]
+            logger.info(
+                "[launcher.proton.core] ARM64 Valve Direct runner enabled via %s with %s",
+                slr_entry, proton_path,
+            )
+
     return ProtonLaunchPlan(
         context=ctx,
         state=state,
@@ -509,4 +554,5 @@ def proton_prepare(
         prefix_path=prefix_path,
         env=env,
         on_process_start=on_process_start,
+        runner_prefix_argv=runner_prefix_argv,
     )
