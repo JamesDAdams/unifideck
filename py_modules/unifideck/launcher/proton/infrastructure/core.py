@@ -413,7 +413,6 @@ def _build_umu_env(
     umu_id: str | None,
     prefix_path: Path,
     proton_path: Path,
-    proton_tool_id: str,
 ) -> dict[str, str]:
     """Build the umu-run environment for a Proton launch.
 
@@ -478,7 +477,14 @@ def _build_umu_env(
         "[launcher.proton.core] plan ready: store=%s umu_store=%s "
         "umu_id=%s prefix=%s proton=%s steam_app_id=%s ld_preload=%r "
         "had_ld_preload_orig=%s",
-        ctx.store, umu_store, umu_id, prefix_path, proton_tool_id,
+        ctx.store, umu_store, umu_id, prefix_path,
+        # ``env["PROTONPATH"]``, NOT ``proton_tool_id``: the id is only a
+        # selector label, and ``setup_prefix`` borrows a different Proton to
+        # run its winetricks verb, so the id can name a Proton this launch
+        # never uses. ``PROTONPATH`` is what the process actually reads, so
+        # this line cannot drift from the run it describes. Same reason
+        # ``services/launcher/helpers.py`` logs the env value there.
+        env.get("PROTONPATH"),
         env.get("SteamAppId"), env.get("LD_PRELOAD"), had_ld_preload_orig,
     )
     return env
@@ -508,7 +514,6 @@ def proton_prepare(
     env = _build_umu_env(
         ctx, umu_store=umu_store, umu_id=umu_id,
         prefix_path=prefix_path, proton_path=proton_path,
-        proton_tool_id=proton_tool_id,
     )
     # Start the gamescope window tagger before returning, not from the
     # on_process_start callback, so a window that appears before umu is fully
@@ -530,20 +535,54 @@ def proton_prepare(
             from .gamescope_window_tagger import start_window_tagger
             start_window_tagger(appid_int)
 
-    # Direct Valve Proton on ARM64 check:
-    # If on ARM64 host, and using an official Valve Proton (which lacks protonfixes/),
-    # drive via SteamLinuxRuntime _v2-entry-point directly without umu.
+    # Direct Valve Proton on ARM64 — ONLY for the one Proton umu cannot
+    # drive: a native ARM64 Valve Proton with no ``protonfixes/``.
+    # umu's ``run_command`` does ``cwd=f"{PROTONPATH}/protonfixes"`` and its
+    # winetricks verb execs ``<PROTONPATH>/protonfixes/winetricks``, so such a
+    # Proton makes every umu invocation die with ``FileNotFoundError`` before
+    # the first Windows process. ``_can_umu_drive`` below is the same test the
+    # selector applies, imported rather than reimplemented so both agree.
+    #
+    # NOT gated on ``"proton" in tool_id``. That clause matches GE-Proton too,
+    # and GE-Proton bundles ``protonfixes/`` — so 0.7.9 rerouted every GE
+    # launch on an ARM64 host into this branch and each one died ~1 s later
+    # with exit code 1 and nothing in game.log, while the same titles had
+    # launched fine under umu on 0.7.8 (field: SteamOS ARM64, gog Mafia III /
+    # Hitman Absolution). umu had just configured the prefix successfully; the
+    # direct runner then had to start a process in it with a Proton that was
+    # never used to build it.
     from unifideck.core.arch import is_arm
+
+    from .selector import _can_umu_drive
+
     runner_prefix_argv: list[str] | None = None
-    if is_arm() and ("arm64" in proton_tool_id.lower() or "arm64" in str(proton_path).lower() or "proton" in proton_tool_id.lower()):
+    if is_arm() and proton_path is not None and not _can_umu_drive(proton_path):
         slr_entry = _find_arm64_slr_entry_point()
         if slr_entry is not None:
             runner_prefix_argv = [
                 str(slr_entry), "--verb=run", "--", str(proton_path), "run",
             ]
             logger.info(
-                "[launcher.proton.core] ARM64 Valve Direct runner enabled via %s with %s",
+                "[launcher.proton.core] ARM64 native Proton without "
+                "protonfixes/ — direct SLR runner enabled via %s with %s",
                 slr_entry, proton_path,
+            )
+        else:
+            # The launch is already doomed: this Proton has no protonfixes/,
+            # so umu's run_command cannot set its cwd, and without a
+            # SteamLinuxRuntime entry point there is no direct runner either.
+            # Deliberately a loud warning rather than a raise — umu is still
+            # handed to the launch so the failure surface stays the ordinary
+            # one (a rc=1 with umu's own message in game.log), and callers
+            # that pass an unresolvable placeholder path are not rejected
+            # outright. The game FAILS either way; this only makes the reason
+            # legible in the log instead of a mystery 1-second exit.
+            logger.error(
+                "[launcher.proton.core] %s has no protonfixes/ (umu cannot "
+                "run it) and no SteamLinuxRuntime_4-arm64 entry point was "
+                "found — this launch will fail. Install or update "
+                "SteamLinuxRuntime_4-arm64, or choose a different Proton in "
+                "Settings > Compatibility.", proton_path,
             )
 
     return ProtonLaunchPlan(

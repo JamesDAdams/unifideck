@@ -46,9 +46,9 @@ def test_comet_and_redist_share_one_auth_definition():
 
 
 async def test_missing_auth_reports_failure_rather_than_silently_passing(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _isolated_redist_paths,
 ):
-    monkeypatch.setattr(redist, "REDIST_DIR", tmp_path / "redist")
+    monkeypatch.setattr(redist, "REDIST_DIR", _isolated_redist_paths.parent)
     monkeypatch.setattr(redist, "AUTH_CONFIG", tmp_path / "absent.json")
     monkeypatch.setattr(redist, "launcher_toast", lambda *a, **k: None)
 
@@ -58,17 +58,17 @@ async def test_missing_auth_reports_failure_rather_than_silently_passing(
 
 
 async def test_download_is_verified_against_disk_not_the_exit_code(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _isolated_redist_paths,
 ):
     """A gogdl that exits 0 without writing anything must NOT count as success."""
-    redist_dir = tmp_path / "redist"
+    redist_dir = _isolated_redist_paths
     auth = tmp_path / "gogdl_auth.json"
     auth.write_text("{}", encoding="utf-8")
     gogdl = tmp_path / "plugin" / "bin" / "gogdl"
     gogdl.parent.mkdir(parents=True)
     gogdl.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    monkeypatch.setattr(redist, "REDIST_DIR", redist_dir)
+    monkeypatch.setattr(redist, "REDIST_DIR", redist_dir.parent)
     monkeypatch.setattr(redist, "AUTH_CONFIG", auth)
     monkeypatch.setattr(redist, "launcher_toast", lambda *a, **k: None)
 
@@ -154,3 +154,102 @@ async def test_marker_written_only_when_redists_landed(
 
 async def _async_noop(*_a, **_k):
     return None
+
+
+@pytest.fixture
+def _isolated_redist_paths(tmp_path, monkeypatch):
+    """Point every redist path at the scratch tree.
+
+    ``_redist_done_marker()`` derives the marker from ``REDIST_DIR`` at call
+    time, so patching ``REDIST_DIR`` alone is now enough for both — no test
+    can reach, or write, the live ``~/.config/unifideck/gogdl/redist``.
+    """
+    monkeypatch.setattr(redist, "REDIST_DIR", tmp_path / "redist")
+    return tmp_path / "redist"
+
+
+async def test_redist_toast_uses_valid_launcher_toast_kwargs(
+    tmp_path, monkeypatch, _isolated_redist_paths,
+):
+    """A misspelled toast kwarg must not abort the whole redist install.
+
+    Field (0.7.9, SteamOS ARM64, gog:1578751750 Mafia III): the toast call
+    passed ``i8n_title_key`` instead of ``i18n_title_key``.
+    ``launcher_toast()`` raised ``TypeError``, which propagated out of
+    ``ensure_redist_downloaded`` and aborted ``apply_gog_setup`` before it
+    downloaded or installed a single redistributable — every launch lost its
+    dependencies to a typo in the progress toast. Field log::
+
+        [compat.gog] gog_setup failed (non-fatal)
+        TypeError: launcher_toast() got an unexpected keyword argument
+        'i8n_title_key'. Did you mean 'i18n_title_key'?
+
+    The REAL ``launcher_toast`` and the REAL ``record_event`` both run here —
+    patching either is exactly the frame that hid this bug in the first place,
+    since the TypeError was raised inside the real function. So the assertion
+    is on the JSONL the launcher actually writes for the frontend to read,
+    which ``tests/conftest.py`` already redirects away from the live file.
+    """
+    import json
+
+    import unifideck.launcher.frontend_bridge as bridge
+
+    auth = tmp_path / "gogdl_auth.json"
+    auth.write_text("{}", encoding="utf-8")
+    gogdl = tmp_path / "plugin" / "bin" / "gogdl"
+    gogdl.parent.mkdir(parents=True)
+    gogdl.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(redist, "AUTH_CONFIG", auth)
+    monkeypatch.setattr(redist, "_gogdl_bin", lambda _plan: gogdl)
+
+    async def _download(_gogdl, _missing):
+        return  # writes nothing, so the call reports failure rather than lying
+
+    monkeypatch.setattr(redist, "_run_redist_download", _download)
+    # Toasts are suppressed during install-time warmup, never on a launch.
+    monkeypatch.setattr(
+        bridge, "_SUPPRESSED", bridge.contextvars.ContextVar("s", default=False),
+    )
+
+    # No TypeError: the toast is emitted with the correct kwarg, and the
+    # function still completes and reports the truthful outcome.
+    ok = await redist.ensure_redist_downloaded(_plan(tmp_path), ["MSVC2019"])
+
+    assert ok is False  # verified against disk, per test_download_is_verified
+
+    lines = [
+        json.loads(line) for line in
+        bridge.EVENTS_FILE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    mine = [
+        rec["kwargs"] for rec in lines
+        if rec.get("event") == "launcher_stage"
+        and rec["kwargs"]["i18n_key"] == "toasts.launcher.installingRedistMessage"
+    ]
+    assert mine == [{
+        "i18n_key": "toasts.launcher.installingRedistMessage",
+        "i18n_title_key": "toasts.launcher.installingRedist",
+        "game_title": "gog:1589319779",
+        "priority": "normal",
+    }]
+
+
+
+async def test_redist_toast_does_not_leak_into_the_real_config_dir(
+    tmp_path, monkeypatch, _isolated_redist_paths,
+):
+    """The done-marker must land in the isolated tree, never the live one."""
+    monkeypatch.setattr(redist, "AUTH_CONFIG", tmp_path / "absent.json")
+    # No deps to download -> the "all present" branch writes the marker.
+    redist_dir = _isolated_redist_paths
+    dep = redist_dir / "__redist" / "ISI"
+    dep.mkdir(parents=True)
+    (dep / "payload").write_text("x", encoding="utf-8")
+
+    ok = await redist.ensure_redist_downloaded(_plan(tmp_path), [])
+
+    assert ok is True
+    assert redist._redist_done_marker().is_file()
+    assert str(redist.REDIST_DIR).startswith(str(tmp_path))

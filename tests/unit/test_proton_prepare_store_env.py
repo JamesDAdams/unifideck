@@ -19,8 +19,11 @@ damage was already done by the earlier setup steps sharing the same env.
 """
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
+from unifideck.core import arch
 from unifideck.launcher.proton.infrastructure import core
 from unifideck.launcher.types.context import LaunchContext, RuntimeState
 
@@ -257,3 +260,282 @@ def test_user_env_override_still_wins(tmp_path, monkeypatch):
         proton_tool_id="GE-Proton11-3",
     )
     assert plan.env["WINEDLLOVERRIDES"] == "icuuc=b"
+
+
+# ── ARM64 direct Proton runner: only where it can actually work ─────────
+#
+# 0.7.9 added a "direct Valve Proton runner" that bypasses umu entirely on
+# ARM64, driving ``SteamLinuxRuntime_4-arm64/_v2-entry-point`` instead. It is
+# the right idea and it is gated far too broadly: the condition is
+# ``is_arm() and ("arm64" in tool_id or "arm64" in path or
+# "proton" in tool_id)``, and the last clause matches **every** Proton-family
+# tool id — including GE-Proton. Field effect (SteamOS ARM64, 0.7.9, gog
+# titles Mafia III / Hitman Absolution): every launch took the direct-runner
+# branch and died in ~1 s with exit code 1, with nothing in game.log, while
+# the very same titles launched fine under umu+GE-Proton on 0.7.8.
+#
+# The runner is only legitimate for a native ARM64 Valve Proton that has NO
+# protonfixes/ — the one case umu cannot drive. GE-Proton bundles
+# protonfixes/, so umu handles it and must be left to do so.
+
+def _prepare_arm(
+    tmp_path, monkeypatch, *, tool_id, proton_path, slr_entry,
+):
+    ctx = LaunchContext(
+        store="gog", game_id="armgame", exe_path=Path("/dev/game.exe"),
+        work_dir=tmp_path, plugin_dir=tmp_path,
+    )
+    prefix = tmp_path / "prefix"
+    prefix.mkdir()
+    monkeypatch.setattr(core, "_resolve_prefix", lambda c: prefix)
+    monkeypatch.setattr(core, "_lookup_umu_id", lambda c, s, p: None)
+    monkeypatch.setattr(core, "_locate_umu_wrapper", lambda p, d: tmp_path / "umu-run")
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
+    if slr_entry is None:
+        monkeypatch.setattr(core, "_find_arm64_slr_entry_point", lambda: None)
+    else:
+        monkeypatch.setattr(
+            core, "_find_arm64_slr_entry_point", lambda: Path(slr_entry),
+        )
+    # A gamescope session would start a window-tagger thread; keep it out.
+    monkeypatch.delenv("GAMESCOPE_WAYLAND_DISPLAY", raising=False)
+    return core.proton_prepare(
+        ctx, RuntimeState(),
+        python_bin=Path("/usr/bin/python3"),
+        proton_path=Path(proton_path),
+        proton_tool_id=tool_id,
+    )
+
+
+def test_ge_proton_never_gets_the_direct_arm_runner(tmp_path, monkeypatch):
+    """GE-Proton ships protonfixes/, so umu drives it — no direct runner.
+
+    The regression: ``"proton" in tool_id`` matched ``GE-Proton11-7``, so
+    every GE launch on an ARM64 host was rerouted into the direct runner and
+    failed, even though umu had just set the prefix up successfully.
+    """
+    ge_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (ge_dir / "protonfixes").mkdir(parents=True)
+    (ge_dir / "proton").write_text("#!/bin/sh\n")
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="GE-Proton11-7",
+        proton_path=ge_dir / "proton",
+        slr_entry="/var/…/SteamLinuxRuntime_4-arm64/_v2-entry-point",
+    )
+    assert plan.runner_prefix_argv is None
+    # The umu path is therefore what build_argv must produce.
+    argv = plan.build_argv("/dev/game.exe")
+    assert argv[0] == "/usr/bin/python3"
+    assert argv[1].endswith("umu-run")
+    assert not any("_v2-entry-point" in a for a in argv)
+
+
+def test_valve_proton_with_protonfixes_keeps_umu(tmp_path, monkeypatch):
+    """A Valve Proton that DOES have protonfixes/ is umu-drivable too."""
+    proton_dir = tmp_path / "steamapps" / "common" / "Proton 11.0 (ARM64)"
+    (proton_dir / "protonfixes").mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry="/var/…/SteamLinuxRuntime_4-arm64/_v2-entry-point",
+    )
+    assert plan.runner_prefix_argv is None
+
+
+def test_arm64_valve_proton_without_protonfixes_uses_direct_runner(
+    tmp_path, monkeypatch,
+):
+    """The one legitimate case: native ARM64 Valve Proton, no protonfixes/.
+
+    umu cannot drive it (its ``run_command`` does
+    ``cwd=f"{PROTONPATH}/protonfixes"``), so the SLR direct runner is the
+    only way this Proton starts a Windows process at all.
+    """
+    proton_dir = tmp_path / "steamapps" / "common" / "Proton 11.0 (ARM64)"
+    proton_dir.mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    # NOTE: no protonfixes/ — the whole point of this case.
+    slr = "/var/…/SteamLinuxRuntime_4-arm64/_v2-entry-point"
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry=slr,
+    )
+    assert plan.runner_prefix_argv == [
+        slr, "--verb=run", "--", str(proton_dir / "proton"), "run",
+    ]
+    assert plan.build_argv("/dev/game.exe") == [
+        *plan.runner_prefix_argv, "/dev/game.exe",
+    ]
+
+
+def test_no_slr_available_means_no_direct_runner(tmp_path, monkeypatch):
+    """Without a SteamLinuxRuntime entry point there is no direct runner."""
+    proton_dir = tmp_path / "steamapps" / "common" / "Proton 11.0 (ARM64)"
+    proton_dir.mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry=None,
+    )
+    assert plan.runner_prefix_argv is None
+
+
+def test_no_slr_and_no_protonfixes_logs_that_the_launch_will_fail(
+    tmp_path, monkeypatch, caplog,
+):
+    """A doomed launch must say so, at ERROR, before the 1-second mystery exit.
+
+    A native ARM64 Proton with no ``protonfixes/`` and no available
+    SteamLinuxRuntime cannot start a Windows process by either route. The
+    launch still proceeds (so the failure surface stays umu's own, and a
+    caller passing an unresolvable placeholder is not hard-rejected), but the
+    log has to state that this WILL fail and name both remedies — that is the
+    difference between a diagnosable failure and the field's bare ``exit code
+    1 after 1.0s`` with nothing in game.log.
+    """
+    proton_dir = tmp_path / "steamapps" / "common" / "Proton 11.0 (ARM64)"
+    proton_dir.mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    log_name = "unifideck.launcher.proton.infrastructure.core"
+    caplog.set_level(logging.ERROR, logger=log_name)
+
+    _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry=None,
+    )
+
+    errors = [
+        r.getMessage() for r in caplog.records
+        if r.levelno == logging.ERROR and "protonfixes" in r.getMessage()
+    ]
+    assert errors, "expected an ERROR explaining the launch cannot work"
+    msg = errors[-1]
+    assert "this launch will fail" in msg
+    # Both remedies, so a field log is actionable without reading the source.
+    assert "SteamLinuxRuntime_4-arm64" in msg
+    assert "Compatibility" in msg
+
+
+def test_x86_64_never_uses_the_direct_runner(tmp_path, monkeypatch):
+    """The runner exists for ARM64 hosts only; x86_64 always goes via umu."""
+    proton_dir = tmp_path / "steamapps" / "common" / "Proton 11.0"
+    proton_dir.mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    ctx = LaunchContext(
+        store="gog", game_id="x86game", exe_path=Path("/dev/game.exe"),
+        work_dir=tmp_path, plugin_dir=tmp_path,
+    )
+    prefix = tmp_path / "prefix"
+    prefix.mkdir()
+    monkeypatch.setattr(core, "_resolve_prefix", lambda c: prefix)
+    monkeypatch.setattr(core, "_lookup_umu_id", lambda c, s, p: None)
+    monkeypatch.setattr(core, "_locate_umu_wrapper", lambda p, d: tmp_path / "umu-run")
+    monkeypatch.setattr(arch, "is_arm", lambda: False)
+    monkeypatch.setattr(
+        core, "_find_arm64_slr_entry_point",
+        lambda: Path("/var/…/SteamLinuxRuntime_4-arm64/_v2-entry-point"),
+    )
+    monkeypatch.delenv("GAMESCOPE_WAYLAND_DISPLAY", raising=False)
+    plan = core.proton_prepare(
+        ctx, RuntimeState(),
+        python_bin=Path("/usr/bin/python3"),
+        proton_path=proton_dir / "proton",
+        proton_tool_id="proton_11",
+    )
+    assert plan.runner_prefix_argv is None
+
+
+# ── One source of truth for which Proton the launch really uses ──────────
+#
+# ``proton_tool_id`` is only a selector label. ``setup_prefix`` legitimately
+# borrows a DIFFERENT Proton to run umu's winetricks verb, so a launch can log
+# ``proton=proton_11`` in its plan line while the process it actually spawns
+# reads ``PROTONPATH=…/GE-Proton11-7`` — which is exactly the pair of lines
+# that made the 0.7.9 ARM64 failures read as two unrelated problems. Both log
+# lines and every consumer below must key off ``PROTONPATH``, the value umu
+# itself reads.
+
+def test_plan_env_protonpath_is_the_proton_the_launch_uses(
+    tmp_path, monkeypatch, caplog,
+):
+    """``PROTONPATH`` must point at the proton_path handed to proton_prepare.
+
+    A ``proton_tool_id`` that names a different build is the caller's problem
+    to solve; what the plan may never do is let the env disagree with the path
+    it was given.
+    """
+    proton_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (proton_dir / "protonfixes").mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",  # a label that disagrees with the path below
+        proton_path=proton_dir / "proton",
+        slr_entry=None,
+    )
+    assert plan.env["PROTONPATH"] == str(proton_dir)
+    assert plan.state.proton_path == proton_dir / "proton"
+
+
+def test_plan_ready_logs_the_proton_it_will_use(tmp_path, monkeypatch, caplog):
+    """The ``plan ready`` line must name PROTONPATH, not the selector label.
+
+    Field (0.7.9, SteamOS ARM64): the plan line read ``proton=proton_11``
+    while every umu process the same launch spawned read
+    ``PROTONPATH=…/GE-Proton11-7``. The two lines described two different
+    Protons, so the ARM64 failures looked like two unrelated bugs. One value,
+    the one umu reads.
+    """
+    proton_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (proton_dir / "protonfixes").mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    tool_id = "proton_11"  # the selector label, deliberately a different id
+    logger = logging.getLogger("unifideck.launcher.proton.infrastructure.core")
+    caplog.set_level(logging.INFO, logger=logger.name)
+    _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry=None,
+    )
+    plan_lines = [r for r in caplog.records if "plan ready" in r.getMessage()]
+    assert plan_lines, "expected a 'plan ready' log line"
+    line = plan_lines[-1].getMessage()
+    assert f"proton={proton_dir}" in line
+    # Anchor on the field delimiter so a future id that merely CONTAINS the
+    # old token (``proton=proton_11_extra``) cannot slip past this guard.
+    assert f" proton={tool_id} " not in f"{line} "
+    assert not re.search(rf"\bproton={re.escape(tool_id)}(\S)", line)
+
+
+
+def test_state_tool_id_is_still_the_selector_label(tmp_path, monkeypatch):
+    """Diagnostics keep the selector label; it is just not the launch truth.
+
+    ``state.proton_tool_id`` is recorded for the same reason
+    ``helpers.py`` logs PROTONPATH instead: the id is what the selector chose,
+    and dropping it would lose the information needed to see that the borrow
+    happened at all.
+    """
+    proton_dir = tmp_path / "compatibilitytools.d" / "GE-Proton11-7"
+    (proton_dir / "protonfixes").mkdir(parents=True)
+    (proton_dir / "proton").write_text("#!/bin/sh\n")
+    plan = _prepare_arm(
+        tmp_path, monkeypatch,
+        tool_id="proton_11",
+        proton_path=proton_dir / "proton",
+        slr_entry=None,
+    )
+    assert plan.state.proton_tool_id == "proton_11"
+    assert plan.env["PROTONPATH"] == str(proton_dir)
+
+

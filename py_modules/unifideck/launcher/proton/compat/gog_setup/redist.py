@@ -10,8 +10,6 @@ import asyncio
 import contextlib
 import fcntl
 import logging
-import os
-import platform
 import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,19 +40,29 @@ def _missing_deps(all_deps: list[str]) -> list[str]:
     ]
 
 
-_REDIST_DONE_MARKER = REDIST_DIR / ".unifideck-redist-done"
+def _redist_done_marker() -> Path:
+    """The "a previous run finished the redist install" marker, resolved now.
+
+    Derived per call rather than frozen at import: a module-level constant is
+    computed before the suite's ``HOME`` redirect runs, so it keeps pointing
+    at the developer's real ``~/.config`` — which made every test that patched
+    only ``REDIST_DIR`` read, and write, the live marker. Same reason
+    ``game_log.launches_dir`` resolves per call.
+    """
+    return REDIST_DIR / ".unifideck-redist-done"
 
 
 def _redist_installed() -> bool:
     """True if a previous run completed the redist install."""
-    return _REDIST_DONE_MARKER.is_file()
+    return _redist_done_marker().is_file()
 
 
 def _mark_redist_done() -> None:
     """Record that the redist install completed successfully."""
     try:
-        _REDIST_DONE_MARKER.parent.mkdir(parents=True, exist_ok=True)
-        _REDIST_DONE_MARKER.write_text("done", encoding="utf-8")
+        marker = _redist_done_marker()
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("done", encoding="utf-8")
     except OSError:
         pass
 
@@ -82,7 +90,7 @@ async def ensure_redist_downloaded(
 
     launcher_toast(
         "toasts.launcher.installingRedistMessage",
-        i8n_title_key="toasts.launcher.installingRedist",
+        i18n_title_key="toasts.launcher.installingRedist",
         game_title=plan.context.game_key,
     )
     gogdl = _gogdl_bin(plan)
