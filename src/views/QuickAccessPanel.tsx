@@ -313,7 +313,7 @@ export const QuickAccessPanel: FC = () => {
             <PluginUpdater />
             <CleanupSection />
             <CaptureLogsSection />
-            {localStorage.getItem("unifideck_dev") === "1" && <DevServerSection />}
+            <DevServerSection />
           </>
         )}
         {tab === "downloads" && <DownloadsTab />}
