@@ -239,11 +239,35 @@ def get_steam_compat_tool_override(app_id: str) -> str | None:
         appid_int = to_unsigned(app_id)
     except (TypeError, ValueError):
         return None
+    signed_id = appid_int if appid_int < 0x80000000 else appid_int - 0x100000000
     content = _read_steam_config_vdf()
-    tool = vdf_compat.parse_compat_tool(content, appid_int) or None
+    tool = (
+        vdf_compat.parse_compat_tool(content, appid_int)
+        or vdf_compat.parse_compat_tool(content, signed_id)
+        or None
+    )
+    if not tool:
+        root = vdf_compat.find_steam_root()
+        if root is not None:
+            for lc in sorted(root.glob("userdata/*/config/localconfig.vdf")):
+                try:
+                    c = lc.read_text(encoding="utf-8", errors="replace")
+                    tool = (
+                        vdf_compat.parse_compat_tool(c, appid_int)
+                        or vdf_compat.parse_compat_tool(c, signed_id)
+                        or None
+                    )
+                    if tool:
+                        logger.info(
+                            "[launcher.proton] found compat tool in localconfig: %s -> %s",
+                            lc, tool,
+                        )
+                        break
+                except OSError:
+                    continue
     logger.info(
-        "[launcher.proton] steam force-compat lookup: appid=%s -> %r",
-        appid_int, tool,
+        "[launcher.proton] steam force-compat lookup: appid=%s (signed=%s) -> %r",
+        appid_int, signed_id, tool,
     )
     return tool
 
