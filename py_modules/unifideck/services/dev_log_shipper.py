@@ -67,7 +67,11 @@ class DevLogShipperService:
         if self._handler is not None:
             return
         self._handler = _BufferHandler(self)
-        logging.getLogger("unifideck").addHandler(self._handler)
+        lg = logging.getLogger("unifideck")
+        lg.addHandler(self._handler)
+        lg.setLevel(logging.DEBUG)
+        for h in lg.handlers:
+            h.setLevel(logging.DEBUG)
 
     def _uninstall(self) -> None:
         if self._handler is not None:
