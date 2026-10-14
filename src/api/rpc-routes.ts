@@ -106,6 +106,8 @@ export const rpcRoutes = {
   subscribeReplay: "subscribe_replay",
   getLauncherToasts: "get_launcher_toasts",
   captureLogs: "capture_logs",
+  getDevServerConfig: "get_dev_server_config",
+  setDevServerConfig: "set_dev_server_config",
   // Account switch + migration (AccountRPCMixin)
   checkAccountSwitch: "check_account_switch",
   migrateAccountData: "migrate_account_data",

@@ -38,6 +38,7 @@ import {
   CollectionsToggle,
   CleanupSection,
   CaptureLogsSection,
+  DevServerSection,
   PluginUpdater,
 } from "../components/settings";
 import { DownloadsTab } from "../components/downloads";
@@ -312,6 +313,7 @@ export const QuickAccessPanel: FC = () => {
             <PluginUpdater />
             <CleanupSection />
             <CaptureLogsSection />
+            {localStorage.getItem("unifideck_dev") === "1" && <DevServerSection />}
           </>
         )}
         {tab === "downloads" && <DownloadsTab />}

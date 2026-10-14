@@ -228,6 +228,12 @@ _SERVICE_DEFS: tuple[tuple[Any, ...], ...] = (
         lambda b, r, c, cfg, p, pl: (),
         lambda b, r, c, cfg, p, pl: {"config": cfg, "paths": p},
     ),
+    (
+        "dev_log_shipper", "unifideck.services.dev_log_shipper",
+        "DevLogShipperService",
+        lambda b, r, c, cfg, p, pl: (cfg,),
+        lambda b, r, c, cfg, p, pl: {"bus": b},
+    ),
     # Sprint 18e — MicrosoftSubscriptionService. Consumes the
     # shared EventBus and CacheManager; reads config for its
     # endpoint URL. Must be instantiated BEFORE the StoreRegistry

@@ -1,0 +1,6 @@
+{
+  "command": "python3 dev-server/server.py",
+  "url": "http://localhost:8765",
+  "hotReload": false,
+  "disableInspect": false
+}

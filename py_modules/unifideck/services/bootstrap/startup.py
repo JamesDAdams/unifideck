@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _ASYNC_START_SERVICES: tuple[str, ...] = (
     # First, so its series covers the rest of boot — the window in which
     # caches fill and every background loop is armed.
+    "dev_log_shipper",
     "memory_sampler",
     "download",
     "account",

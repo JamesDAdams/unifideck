@@ -17,6 +17,7 @@ export { GameDetailsViewModeToggle } from "./GameDetailsViewModeToggle";
 export { CollectionsToggle } from "./CollectionsToggle";
 export { CleanupSection } from "./CleanupSection";
 export { CaptureLogsSection } from "./CaptureLogsSection";
+export { DevServerSection } from "./DevServerSection";
 export { StoreAuthButton } from "./StoreAuthButton";
 export { StoreStorefrontButton } from "./StoreStorefrontButton";
 export { PluginUpdater } from "./PluginUpdater";

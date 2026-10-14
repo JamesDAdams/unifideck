@@ -246,7 +246,7 @@
       {
         "tag": "fr-FR",
         "deepl_code": "FR",
-        "name": "Fran\u00e7ais",
+        "name": "Français",
         "rtl": false
       },
       {
@@ -258,7 +258,7 @@
       {
         "tag": "es-ES",
         "deepl_code": "ES",
-        "name": "Espa\u00f1ol",
+        "name": "Español",
         "rtl": false
       },
       {
@@ -270,7 +270,7 @@
       {
         "tag": "pt-BR",
         "deepl_code": "PT-BR",
-        "name": "Portugu\u00eas (Brasil)",
+        "name": "Português (Brasil)",
         "rtl": false
       },
       {
@@ -288,19 +288,19 @@
       {
         "tag": "ru-RU",
         "deepl_code": "RU",
-        "name": "\u0420\u0443\u0441\u0441\u043a\u0438\u0439",
+        "name": "Русский",
         "rtl": false
       },
       {
         "tag": "uk-UA",
         "deepl_code": "UK",
-        "name": "\u0423\u043a\u0440\u0430\u0457\u043d\u0441\u044c\u043a\u0430",
+        "name": "Українська",
         "rtl": false
       },
       {
         "tag": "tr-TR",
         "deepl_code": "TR",
-        "name": "T\u00fcrk\u00e7e",
+        "name": "Türkçe",
         "rtl": false
       },
       {
@@ -346,5 +346,13 @@
       "~/.local/share/unifideck/microsoft_tokens.json",
       "~/.config/unifideck/gog_token.json"
     ]
+  },
+  "dev_logs": {
+    "_comment": "Temporary dev log shipping. When enabled, the plugin streams live backend logs to a Mac dev server so they can be read without exporting a bundle.",
+    "enabled": false,
+    "url": "",
+    "token": "",
+    "batch_size": 50,
+    "flush_interval_seconds": 1
   }
 }

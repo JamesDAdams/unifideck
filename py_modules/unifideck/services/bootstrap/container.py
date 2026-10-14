@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from unifideck.services.activity_log import ActivityLogService
     from unifideck.services.artwork import ArtworkService
     from unifideck.services.cloud_save import CloudSaveService
+    from unifideck.services.dev_log_shipper import DevLogShipperService
     from unifideck.services.compatibility import CompatibilityService
     from unifideck.services.download import DownloadService
     from unifideck.services.feature_flag_service import FeatureFlagService
@@ -51,6 +52,8 @@ class ServiceContainer:
     download: DownloadService | None = None
     metadata: MetadataService | None = None
     artwork: ArtworkService | None = None
+    # Temporary dev log shipper — plugin process streams live logs to a Mac.
+    dev_log_shipper: DevLogShipperService | None = None
     compatibility: CompatibilityService | None = None
     activity_log: ActivityLogService | None = None
     proton: ProtonService | None = None

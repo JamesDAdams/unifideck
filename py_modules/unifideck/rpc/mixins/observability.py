@@ -36,6 +36,7 @@ class ObservabilityRPCMixin:
     watchdog: Any
     latency: Any
     replay: Any
+    config: Any
     # Set by ``validate_config_at_startup`` via ``boot_plugin``; read only
     # by ``_config_validation_block``. Annotated with the leading
     # underscore the plugin actually uses — the retired
@@ -43,6 +44,7 @@ class ObservabilityRPCMixin:
     # silently always hit the empty fallback.
     _config_validation_result: Any = None
     _config_degraded: bool = False
+
 
     # There is deliberately no ``set_bus_collaborators`` setter. One existed
     # with zero callers: ``bootstrap/pipeline_factory.py`` assigns
@@ -170,6 +172,40 @@ class ObservabilityRPCMixin:
         except Exception as err:
             logger.exception("[Observability] log capture failed")
             raise RpcError("bundle_failed", detail=repr(err)) from err
+
+    async def get_dev_server_config(self) -> Any:
+        shipper = getattr(self.services, "dev_log_shipper", None)
+        cfg = getattr(self, "config", None)
+        url = cfg.get("dev_logs.url", "") if cfg is not None else ""
+        enabled = bool(cfg.get("dev_logs.enabled", False)) if cfg is not None else False
+        token = cfg.get("dev_logs.token", "") if cfg is not None else ""
+        return {
+            "enabled": enabled,
+            "url": url,
+            "token": token,
+            "status": shipper.status() if shipper is not None else {"enabled": enabled, "url": url, "queued": 0, "installed": False},
+        }
+
+    async def set_dev_server_config(self, enabled: bool, url: str, token: str = "") -> Any:
+        shipper = getattr(self.services, "dev_log_shipper", None)
+        result = None
+        if shipper is not None:
+            result = shipper.configure(bool(enabled), str(url or ""), str(token or ""))
+        else:
+            # persist via config
+            cfg = getattr(self, "config", None)
+            if cfg is not None:
+                cfg.set("dev_logs.enabled", bool(enabled))
+                cfg.set("dev_logs.url", str(url or ""))
+                cfg.set("dev_logs.token", str(token or ""))
+            result = {"enabled": bool(enabled), "url": str(url or ""), "queued": 0, "installed": False}
+        # sync config service needs start if enabling
+        if enabled and url and shipper is not None:
+            try:
+                await shipper.start()
+            except Exception:
+                pass
+        return result
 
     def _support_bundle_extra(self) -> dict[str, Any]:
         """Gather the facts only this layer can see.
