@@ -1,9 +1,4 @@
-"""services/dev_log_shipper.py — Temporary live log shipper to a Mac dev server.
-
-Installed as a logging handler on the ``unifideck`` logger. When enabled
-via config, it batches log records and POSTs them to a dev server URL.
-Everything is best-effort: failures only debug-logged.
-"""
+"""services/dev_log_shipper.py — Temporary live log shipper to a Mac dev server."""
 from __future__ import annotations
 
 import asyncio
@@ -25,16 +20,14 @@ class _BufferHandler(logging.Handler):
         super().__init__()
         self._shipper = shipper
 
-    def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             self._shipper.enqueue(record)
-        except Exception:  # pragma: no cover
+        except Exception:
             pass
 
 
 class DevLogShipperService:
-    """Live log shipping service (temporary)."""
-
     def __init__(self, config: ConfigManager | None = None, bus: Any = None) -> None:
         self._config = config
         self._bus = bus
@@ -74,9 +67,7 @@ class DevLogShipperService:
         if self._handler is not None:
             return
         self._handler = _BufferHandler(self)
-        root = logging.getLogger("unifideck")
-        root.addHandler(self._handler)
-        # task creation moved to async start()
+        logging.getLogger("unifideck").addHandler(self._handler)
 
     def _uninstall(self) -> None:
         if self._handler is not None:
@@ -137,9 +128,10 @@ class DevLogShipperService:
             self._stopped = False
             if self._task is None or self._task.done():
                 try:
-                    self._task = asyncio.get_event_loop().create_task(self._loop())
+                    self._task = asyncio.ensure_future(self._loop())
                 except RuntimeError:
                     self._task = None
+            # flush any already queued? no-op
 
     async def stop(self) -> None:
         self._stopped = True
@@ -155,7 +147,6 @@ class DevLogShipperService:
         }
 
     def configure(self, enabled: bool, url: str, token: str = "") -> dict[str, Any]:
-        # persist
         if self._config is not None:
             try:
                 self._config.set("dev_logs.enabled", enabled)
@@ -174,5 +165,4 @@ class DevLogShipperService:
             self._uninstall()
         return self.status()
 
-# entry-point: dev_log_shipper module importable for testssmoke
 # entry-point: dev tooling

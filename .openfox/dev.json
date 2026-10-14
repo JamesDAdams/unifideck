@@ -1,5 +1,5 @@
 {
-  "command": "python3 dev-server/server.py",
+  "command": "DECKY_DEV_SERVER_TOKEN=unifideck-dev python3 dev-server/server.py",
   "url": "http://localhost:8765",
   "hotReload": false,
   "disableInspect": false
