@@ -407,10 +407,21 @@ async def _run(argv: list[str]) -> int:
             _cfg = None
         prune_old_launches(_cfg)
         _archive_handler = attach_launch_handler(lid, _cfg)
+        _shipper = None
+        try:
+            from unifideck.services.dev_log_shipper import DevLogShipperService
+            _shipper = DevLogShipperService(_cfg)
+        except Exception:
+            pass
         try:
             return await _run_with_id(argv)
         finally:
             detach_launch_handler(_archive_handler)
+            if _shipper is not None:
+                try:
+                    await _shipper.stop()
+                except Exception:
+                    pass
 
 async def _run_with_id(argv: list[str]) -> int:
 
