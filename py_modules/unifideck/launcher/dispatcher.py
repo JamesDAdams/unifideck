@@ -398,11 +398,14 @@ async def _run(argv: list[str]) -> int:
     with launch_id_scope(lid):
         try:
             from unifideck.config.config_manager import ConfigManager
+            from unifideck.config.defaults_path import resolve_defaults_config_path
+            from unifideck.config.user_config_path import resolve_user_config_path
             from unifideck.core.paths import resolve_plugin_dir
-            _cfg = ConfigManager(str(
-                resolve_plugin_dir() /
-                "defaults" /
-                "config.json"))
+            _p_dir = resolve_plugin_dir()
+            _cfg = ConfigManager(
+                defaults_path=resolve_defaults_config_path(_p_dir),
+                user_path=resolve_user_config_path(),
+            )
         except Exception:
             _cfg = None
         prune_old_launches(_cfg)
