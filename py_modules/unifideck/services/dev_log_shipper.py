@@ -1,9 +1,9 @@
 """services/dev_log_shipper.py — Temporary live log shipper to a Mac dev server."""
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
+import threading
 import time
 import urllib.request
 from collections import deque
@@ -20,7 +20,7 @@ class _BufferHandler(logging.Handler):
         super().__init__()
         self._shipper = shipper
 
-    def emit(self, record: logging.LogRecord) -> None:
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
         try:
             self._shipper.enqueue(record)
         except Exception:
@@ -28,18 +28,20 @@ class _BufferHandler(logging.Handler):
 
 
 class DevLogShipperService:
+    """Live log shipping service (temporary thread-based)."""
+
     def __init__(self, config: ConfigManager | None = None, bus: Any = None) -> None:
         self._config = config
         self._bus = bus
-        self._queue: deque[dict[str, Any]] = deque(maxlen=10000)
+        self._queue: deque[dict[str, Any]] = deque(maxlen=100000)
         self._handler: _BufferHandler | None = None
         self._enabled = False
-        self._task: asyncio.Task | None = None
         self._url = ""
         self._token = ""
         self._batch_size = 50
         self._flush_interval = 1.0
-        self._stopped = False
+        self._worker: threading.Thread | None = None
+        self._stop_event = threading.Event()
         self._load_config()
         if self._enabled and self._url:
             self._install()
@@ -72,14 +74,18 @@ class DevLogShipperService:
         lg.setLevel(logging.DEBUG)
         for h in lg.handlers:
             h.setLevel(logging.DEBUG)
+        self._stop_event.clear()
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
 
     def _uninstall(self) -> None:
         if self._handler is not None:
             logging.getLogger("unifideck").removeHandler(self._handler)
             self._handler = None
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
-        self._task = None
+        self._stop_event.set()
+        if self._worker is not None:
+            self._worker.join(timeout=3)
+        self._worker = None
 
     def enqueue(self, record: logging.LogRecord) -> None:
         if not self._enabled:
@@ -96,12 +102,14 @@ class DevLogShipperService:
         }
         self._queue.append(entry)
 
-    async def _loop(self) -> None:
-        while not self._stopped:
-            await asyncio.sleep(self._flush_interval)
-            await self._flush()
+    def _worker_loop(self) -> None:
+        while not self._stop_event.is_set():
+            self._flush_once()
+            self._stop_event.wait(self._flush_interval)
+        # final drain
+        self._flush_once()
 
-    async def _flush(self) -> None:
+    def _flush_once(self) -> None:
         if not self._queue or not self._url:
             return
         batch: list[dict[str, Any]] = []
@@ -111,9 +119,12 @@ class DevLogShipperService:
             return
         payload = {"source": "unifideck", "lines": [json.dumps(e) for e in batch]}
         try:
-            await asyncio.to_thread(self._post, payload)
+            self._post(payload)
         except Exception as e:
             logger.debug("[DevLogShipper] flush failed: %s", e)
+            # requeue failed batch at front (best effort)
+            for e2 in reversed(batch):
+                self._queue.appendleft(e2)
 
     def _post(self, payload: dict[str, Any]) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -129,17 +140,8 @@ class DevLogShipperService:
         if self._enabled and self._url:
             if self._handler is None:
                 self._install()
-            self._stopped = False
-            if self._task is None or self._task.done():
-                try:
-                    self._task = asyncio.ensure_future(self._loop())
-                except RuntimeError:
-                    self._task = None
-            # flush any already queued? no-op
 
     async def stop(self) -> None:
-        self._stopped = True
-        await self._flush()
         self._uninstall()
 
     def status(self) -> dict[str, Any]:
@@ -162,7 +164,6 @@ class DevLogShipperService:
         self._url = url
         self._token = token
         if enabled and url:
-            self._stopped = False
             if self._handler is None:
                 self._install()
         else:
