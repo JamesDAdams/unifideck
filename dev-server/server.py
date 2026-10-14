@@ -104,8 +104,9 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), _Handler)
-    print(f"dev server listening on 0.0.0.0:{PORT}", flush=True)
+    host = os.environ.get("DECKY_DEV_SERVER_HOST", "0.0.0.0")
+    httpd = ThreadingHTTPServer((host, PORT), _Handler)
+    print(f"dev server listening on {host}:{PORT}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -114,4 +115,3 @@ def main() -> None:
 
 if __name__ == "__main__":  # entry-point: dev server
     main()
-PY
