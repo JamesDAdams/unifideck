@@ -13,6 +13,7 @@ from typing import Any
 
 from unifideck.launcher.frontend_bridge import launcher_toast
 from unifideck.launcher.proton.infrastructure.game_log import (
+    game_log_path,
     open_game_log,
 )
 
@@ -439,6 +440,15 @@ async def run_umu_with_retry(
                 "[launcher.umu] attempt %d exit code: %d (ran %.1fs)",
                 attempt, rc, ran_for,
             )
+            if rc != 0 and out is not None:
+                try:
+                    out.flush()
+                    _glp = game_log_path()
+                    if _glp and _glp.is_file():
+                        for _line in _glp.read_text(encoding="utf-8", errors="replace").splitlines()[-30:]:
+                            logger.error("[launcher.game.log] %s", _line)
+                except Exception as _e:
+                    logger.debug("[launcher.game.log] tail failed: %s", _e)
             if on_exit is not None:
                 with contextlib.suppress(Exception):
                     on_exit(rc, ran_for)
