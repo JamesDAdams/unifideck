@@ -47,7 +47,8 @@ def _setup_args(
     win_install = _win_path(install_path)
     win_support = _win_path(str(SUPPORT_DIR / product_id))
     return [
-        "/VERYSILENT", f"/DIR={win_install}",
+        "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES",
+        f"/DIR={win_install}",
         f"/Language={name}", f"/LANG={name}",
         f"/ProductId={product_id}", "/galaxyclient",
         f"/buildId={manifest.get('buildId', '0')}",
