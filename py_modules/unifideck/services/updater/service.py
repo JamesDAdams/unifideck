@@ -112,7 +112,7 @@ class UpdaterService:
     """
 
     GITHUB_API_URL = (
-        "https://api.github.com/repos/mubaraknumann/unifideck/releases"
+        "https://api.github.com/repos/JamesDAdams/unifideck/releases"
     )
     CACHE_TTL_SECONDS = 3600        # 1 hour
     POLL_INTERVAL_SECONDS = 21600   # 6 hours
