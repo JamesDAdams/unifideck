@@ -114,7 +114,8 @@ async def apply_gog_setup(
             "[gog_setup] redistributables incomplete for %s — launching anyway",
             game_id,
         )
-    _write_marker(marker)
+    else:
+        _write_marker(marker)
     logger.info("[gog_setup] complete for %s", game_id)
 
 

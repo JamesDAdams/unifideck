@@ -57,15 +57,6 @@ MANUAL_FIXES: dict[str, GameFix] = {
         notes="EOS overlay only, no redistributables needed",
         source="manual",
     ),
-    "1207658924": GameFix(
-        winetricks=["vcrun2005", "d3dcompiler_43", "d3dcompiler_47"],
-        exe_override="System/witcher.exe",
-        notes=(
-            "Bypass GOG Launcher.exe stub which shows 'Path not found' "
-            "dialog in fullscreen; launch System/witcher.exe directly."
-        ),
-        source="manual",
-    ),
 }
 # ── Rockstar-on-Epic games (RDR2 / GTA5) ──────────────────────────
 # These Epic titles boot the Rockstar Games Launcher, which then runs

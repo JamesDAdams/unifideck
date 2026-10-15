@@ -178,23 +178,27 @@ def _load_play_tasks(info_file: str) -> list[dict[str, Any]]:
 def resolve_fallback_exe(install_path: str) -> str | None:
     """Return the real game exe when the primary playTask is a stub.
 
-    Only fires when the primary ``goggame-*.info`` playTask is a
-    ``launcher``/``tool`` category — real game-category primaries are
-    never bypassed (mirrors staging). Returns the first game-category
+    Fires when the primary ``goggame-*.info`` playTask is a
+    ``launcher``/``tool`` category or a launcher stub executable name
+    (launcher.exe, autorun.exe). Returns the first game-category
     ``FileTask`` exe that exists on disk, or None.
     """
     for info_file in Path(install_path).glob("goggame-*.info"):
         tasks = _load_play_tasks(str(info_file))
         primary = next((t for t in tasks if t.get("isPrimary")), None)
-        if not primary or str(
-            primary.get("category", "")
-        ).lower() not in ("launcher", "tool"):
+        if not primary:
+            return None
+        cat = str(primary.get("category", "")).lower()
+        fname = Path(str(primary.get("path", ""))).name.lower()
+        if cat not in ("launcher", "tool") and fname not in ("launcher.exe", "launch.exe", "autorun.exe"):
             return None
         for t in tasks:
             if (
-                t.get("category") == "game"
+                t != primary
                 and t.get("type") == "FileTask"
                 and t.get("path")
+                and Path(str(t["path"])).name.lower() not in ("launcher.exe", "launch.exe", "autorun.exe")
+                and (t.get("category") == "game" or not cat)
             ):
                 candidate = Path(install_path) / str(t["path"]).replace("\\", "/")
                 if candidate.is_file():
@@ -302,7 +306,10 @@ async def _run_umu_exe(
     """
     cwd = exe_path.parent if exe_path.parent.is_dir() else None
     required_args = _read_required_launch_args(work_dir, exe_path)
-    argv = plan.build_argv(exe_path, *required_args, *plan.state.game_args)
+    if hasattr(plan, "build_argv"):
+        argv = plan.build_argv(exe_path, *required_args, *plan.state.game_args)
+    else:
+        argv = [str(plan.python_bin), str(plan.umu_wrapper), str(exe_path), *required_args, *plan.state.game_args]
     return await run_umu_with_retry(
         argv, env=plan.env, cwd=cwd, on_start=plan.on_process_start,
         max_attempts=max_attempts,
@@ -374,7 +381,6 @@ async def _run_gog_with_fallback(
     *, run: GameRun,
 ) -> int:
     """Run via Comet; retry the real game exe if a launcher stub bails early."""
-    # Check for curated exe override (e.g. Witcher 1 System/witcher.exe)
     target_exe = plan.context.exe_path
     game_id = getattr(plan.context, "game_id", None)
     if game_id:
@@ -391,25 +397,6 @@ async def _run_gog_with_fallback(
                     target_exe = override_full
         except Exception:
             logger.debug("[compat.gog] exe override check failed", exc_info=True)
-
-    # Witcher 1 registry injection (InstallFolder + Language)
-    if game_id == "1207658924":
-        try:
-            from unifideck.launcher.proton.infrastructure.setup_run import run_setup_exe
-            win_install = "Z:" + str(work_dir).replace("/", "\\")
-            for sub in ("CD Projekt Red\\The Witcher", "WOW6432Node\\CD Projekt Red\\The Witcher"):
-                await run_setup_exe(
-                    plan, "reg.exe",
-                    ["add", f"HKLM\\Software\\{sub}", "/v", "InstallFolder", "/d", win_install, "/f"],
-                    store="gog", timeout_s=10.0, label="witcher_reg",
-                )
-                await run_setup_exe(
-                    plan, "reg.exe",
-                    ["add", f"HKLM\\Software\\{sub}", "/v", "Language", "/d", "3", "/f"],
-                    store="gog", timeout_s=10.0, label="witcher_reg",
-                )
-        except Exception:
-            logger.debug("[compat.gog] witcher registry injection failed", exc_info=True)
 
     comet = start_comet(plan)
     try:
