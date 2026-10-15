@@ -107,6 +107,17 @@ class _Handler(BaseHTTPRequestHandler):
                     f.write(encoded + "\n")
             except OSError:
                 pass
+
+            # Print directly to stdout so logs show up live in OpenFox Dev Server interface
+            try:
+                parsed = json.loads(line)
+                lvl = parsed.get("level", "INFO")
+                logger_name = parsed.get("logger", source)
+                msg = parsed.get("msg", line)
+                print(f"[{source}] [{lvl}] {logger_name}: {msg}", flush=True)
+            except Exception:
+                print(f"[{source}] {line}", flush=True)
+
             accepted += 1
         self._send(200, {"accepted": accepted})
 
@@ -117,7 +128,28 @@ class _Handler(BaseHTTPRequestHandler):
 def main() -> None:
     host = os.environ.get("DECKY_DEV_SERVER_HOST", "0.0.0.0")
     httpd = ThreadingHTTPServer((host, PORT), _Handler)
-    print(f"dev server listening on {host}:{PORT}", flush=True)
+    print(f"=== Dev server listening on {host}:{PORT} ===", flush=True)
+    if os.path.isfile(LOG_FILE):
+        try:
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
+                recent = [l.strip() for l in f if l.strip()][-25:]
+            if recent:
+                print("--- Recent SteamOS logs ---", flush=True)
+                for entry in recent:
+                    try:
+                        d = json.loads(entry)
+                        src = d.get("source", "unifideck")
+                        line = d.get("line", "")
+                        parsed = json.loads(line)
+                        lvl = parsed.get("level", "INFO")
+                        logger_name = parsed.get("logger", src)
+                        msg = parsed.get("msg", line)
+                        print(f"[{src}] [{lvl}] {logger_name}: {msg}", flush=True)
+                    except Exception:
+                        print(entry, flush=True)
+                print("--- End of recent logs (live streaming active) ---", flush=True)
+        except Exception:
+            pass
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
