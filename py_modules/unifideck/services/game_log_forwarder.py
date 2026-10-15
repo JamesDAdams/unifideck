@@ -20,7 +20,7 @@ from unifideck.event_bus.event_bus_devex import auto_wire, subscribe
 logger = logging.getLogger(__name__)
 
 _LAUNCHES_DIR = Path("~/.local/share/unifideck/launches").expanduser()
-_TAIL_LINES = 80
+_TAIL_LINES = 250
 _MAX_AGE_SECONDS = 30.0
 
 

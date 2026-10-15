@@ -573,6 +573,13 @@ def proton_prepare(
             runner_prefix_argv = [
                 str(slr_entry), "--verb=run", "--", str(proton_bin), "run",
             ]
+            # Official Valve Proton scripts require STEAM_COMPAT_CLIENT_INSTALL_PATH
+            # and STEAM_COMPAT_TOOL_PATHS in env (otherwise KeyError: STEAM_COMPAT_CLIENT_INSTALL_PATH).
+            steam_client_dir = Path("~/.local/share/Steam").expanduser()
+            if not steam_client_dir.is_dir():
+                steam_client_dir = Path("~/.steam/steam").expanduser()
+            env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(steam_client_dir)
+            env["STEAM_COMPAT_TOOL_PATHS"] = str(proton_bin.parent)
             logger.info(
                 "[launcher.proton.core] ARM64 native Proton without "
                 "protonfixes/ — direct SLR runner enabled via %s with %s",
