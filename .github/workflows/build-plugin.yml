@@ -180,7 +180,7 @@ jobs:
 
       - name: Build production plugin
         run: |
-          ./build-plugin.sh prod
+          NO_CONTAINER=1 ./build-plugin.sh prod
           cp -f out/unifideck.prod.*.zip out/Unifideck.zip
 
       - name: Extract plugin zip for artifact
