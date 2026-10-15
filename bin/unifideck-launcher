@@ -24,6 +24,14 @@ from __future__ import annotations
 
 import os
 
+# Early-log directly at file load time to prove the script was executed
+try:
+    with open("/tmp/unifideck-launcher-debug.log", "a", encoding="utf-8") as _ef:
+        import sys, time
+        _ef.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] LOADED: py={sys.version.split()[0]} argv={sys.argv} in_pv={os.environ.get('container') == 'pressure-vessel'}\n")
+except Exception:
+    pass
+
 os.environ.pop("LD_LIBRARY_PATH", None)
 os.environ.pop("LD_PRELOAD", None)
 
@@ -207,6 +215,21 @@ def _bootstrap_path() -> None:
 
 
 def _dev_log(msg: str) -> None:
+    # Always append to a local early-log file so GameLogForwarder can find it
+    try:
+        ld = Path("~/.local/share/unifideck/launches").expanduser()
+        ld.mkdir(parents=True, exist_ok=True)
+        with open(ld / "launcher-early.log", "a", encoding="utf-8") as f:
+            import time
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+    try:
+        with open("/tmp/unifideck-launcher-debug.log", "a", encoding="utf-8") as f:
+            import time
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
     try:
         import json
         import urllib.request

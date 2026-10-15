@@ -43,36 +43,56 @@ class GameLogForwarder:
     def _forward_latest(self, game_key: str) -> None:
         if not _LAUNCHES_DIR.is_dir():
             return
+        # Check /tmp/unifideck-launcher-debug.log
+        debug_log = Path("/tmp/unifideck-launcher-debug.log")
+        if debug_log.is_file():
+            dt = debug_log.read_text(encoding="utf-8", errors="replace")
+            logger.info("[GameLogForwarder] /tmp debug log (%d lines):", len(dt.splitlines()))
+            for line in dt.splitlines()[-20:]:
+                logger.error("[launcher-debug] %s", line)
+
+        # Find all log files (.log and .game.log) sorted newest first
         candidates = sorted(
-            _LAUNCHES_DIR.glob("*.game.log"),
+            [p for p in _LAUNCHES_DIR.iterdir() if p.suffix == ".log" or p.name.endswith(".game.log")],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
         if not candidates:
+            logger.info("[GameLogForwarder] no log files found in %s", _LAUNCHES_DIR)
             return
+        # Log the 5 most recent files and their ages for diagnosis
+        for c in candidates[:5]:
+            c_age = time.time() - c.stat().st_mtime
+            logger.info("[GameLogForwarder] candidate: %s (%.0fs old, %d bytes)", c.name, c_age, c.stat().st_size)
+
+        # Pick the newest file regardless of type
         newest = candidates[0]
         age = time.time() - newest.stat().st_mtime
-        if age > _MAX_AGE_SECONDS:
-            logger.debug(
-                "[GameLogForwarder] newest game.log is %.0fs old, skipping", age,
+        if age > 120.0:
+            logger.warning(
+                "[GameLogForwarder] newest log is %.0fs old (>120s), skipping tail", age,
             )
             return
         text = newest.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
         logger.info(
-            "[GameLogForwarder] %s — game.log %s (%d lines, %.0fs old)",
+            "[GameLogForwarder] %s — newest log %s (%d lines, %.0fs old)",
             game_key, newest.name, len(lines), age,
         )
         tail = lines[-_TAIL_LINES:]
         for line in tail:
-            logger.error("[game.log] %s", line)
-        launcher_log = newest.with_suffix("").with_suffix(".log")
-        if launcher_log.is_file():
-            lt = launcher_log.read_text(encoding="utf-8", errors="replace")
-            ll = lt.splitlines()
+            logger.error("[%s] %s", newest.name, line)
+
+        # Also check if there's a paired .game.log or .log file
+        pair_suffix = ".game.log" if not newest.name.endswith(".game.log") else ".log"
+        base_name = newest.name.replace(".game.log", "").replace(".log", "")
+        paired = _LAUNCHES_DIR / f"{base_name}{pair_suffix}"
+        if paired.is_file() and paired != newest:
+            pt = paired.read_text(encoding="utf-8", errors="replace")
+            plines = pt.splitlines()
             logger.info(
-                "[GameLogForwarder] launcher log %s (%d lines)",
-                launcher_log.name, len(ll),
+                "[GameLogForwarder] paired log %s (%d lines)",
+                paired.name, len(plines),
             )
-            for line in ll[-_TAIL_LINES:]:
-                logger.error("[launcher.log] %s", line)
+            for line in plines[-_TAIL_LINES:]:
+                logger.error("[%s] %s", paired.name, line)
