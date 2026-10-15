@@ -201,4 +201,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
-          gh release upload "$TAG" out/Unifideck.zip out/unifideck.prod.*.zip --clobber
+          gh release upload "$TAG" out/Unifideck.zip --clobber
