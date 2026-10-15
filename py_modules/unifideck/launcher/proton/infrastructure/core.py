@@ -377,9 +377,15 @@ def _apply_compat_paths(
     # on the Deck's AMD GPU; required by some titles' NVAPI probes).
     env["DXVK_NVAPI_ALLOW_OTHER_DRIVERS"] = "1"
 
-    # Forward work_dir and unifideck configs to pressure-vessel
+    # Forward work_dir, prefix, and unifideck configs to pressure-vessel
     existing_rw = env.get("PRESSURE_VESSEL_FILESYSTEMS_RW", "")
-    needed_rw = [str(work_dir), str(Path("~/.config/unifideck").expanduser())]
+    needed_rw = [
+        str(work_dir),
+        str(prefix_path),
+        str(Path("~/.local/share/unifideck").expanduser()),
+        str(Path("~/.config/unifideck").expanduser()),
+        "/var/home",
+    ]
     current_rw = existing_rw.split(":") if existing_rw else []
     for p in needed_rw:
         if p and p not in current_rw:

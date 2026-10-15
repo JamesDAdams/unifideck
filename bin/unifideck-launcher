@@ -206,6 +206,26 @@ def _bootstrap_path() -> None:
         sys.path.insert(0, str(py_modules))
 
 
+def _dev_log(msg: str) -> None:
+    try:
+        import json
+        import urllib.request
+        cfg_file = Path("~/.config/unifideck/config.json").expanduser()
+        if cfg_file.is_file():
+            c = json.loads(cfg_file.read_text(encoding="utf-8"))
+            dev = c.get("dev_logs", {})
+            if dev.get("enabled") and dev.get("url"):
+                url = dev["url"].rstrip("/") + "/ingest"
+                payload = json.dumps({"source": "unifideck-launcher", "lines": [f"[launcher-bin] {msg}"]}).encode()
+                req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+                if dev.get("token"):
+                    req.add_header("X-Dev-Token", dev["token"])
+                with urllib.request.urlopen(req, timeout=2):
+                    pass
+    except Exception:
+        pass
+
+
 def main() -> int:
     """Entry point — bootstrap, hand off to the dispatcher, return its code.
 
@@ -215,10 +235,12 @@ def main() -> int:
     whatever ``dispatcher_main`` returns ; Steam surfaces a
     non-zero exit code as a "game failed to launch" toast.
     """
+    _dev_log(f"main() starting: argv={sys.argv} in_pv={_in_pressure_vessel()} guard={os.environ.get(_REEXEC_GUARD_ENV)}")
     _bootstrap_path()
     try:
         from unifideck.launcher.dispatcher import main as dispatcher_main
     except ImportError as exc:
+        _dev_log(f"failed to import dispatcher: {exc}")
         print(
             f"[unifideck-launcher] failed to import dispatcher: {exc}",
             file=sys.stderr,
