@@ -1723,7 +1723,7 @@ main() {
     sync_version
 
     # Attempt Decky CLI containerized build first
-    if check_decky_cli; then
+    if [ -z "${NO_CONTAINER:-}" ] && check_decky_cli; then
         ENGINE=$(check_container_engine || true)
         if [ -n "$ENGINE" ]; then
             chmod -R a+rwX "$SCRIPT_DIR" || true
