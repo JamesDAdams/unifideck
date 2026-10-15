@@ -79,6 +79,10 @@ class DevLogShipperService:
         self._worker.start()
 
     def _uninstall(self) -> None:
+        try:
+            self._flush_once()
+        except Exception:
+            pass
         if self._handler is not None:
             logging.getLogger("unifideck").removeHandler(self._handler)
             self._handler = None
@@ -92,6 +96,9 @@ class DevLogShipperService:
             return
         try:
             msg = record.getMessage()
+            if record.exc_info:
+                import traceback
+                msg += "\n" + "".join(traceback.format_exception(*record.exc_info))
         except Exception:
             msg = str(record.msg)
         entry = {

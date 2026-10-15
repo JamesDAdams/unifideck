@@ -212,6 +212,16 @@ def _special_action_context(
     """
     action_store, action, is_launch_action = _detect_special_action()
     if is_launch_action:
+        if "-auth" in game_id or game_id.endswith("-auth"):
+            action_store = store
+            action = "auth"
+            is_launch_action = False
+        elif "-store" in game_id or game_id.endswith("-store"):
+            action_store = store
+            action = "storefront"
+            is_launch_action = False
+
+    if is_launch_action:
         return None
     logger.info(
         "[launcher.dispatcher] %s action detected: store=%s game_key=%s",

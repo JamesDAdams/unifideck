@@ -50,14 +50,23 @@ def parse_argv(argv: list[str]) -> tuple[str, str]:
             "missing store:game_id argument",
             context={"argv": argv},
         )
-    game_key = argv[1]
+    # Find the store:game_id argument (which contains a colon and is not an env assignment)
+    game_key_idx = -1
+    for idx, arg in enumerate(argv[1:], 1):
+        if ":" in arg and not arg.startswith("UNIFIDECK_") and "=" not in arg:
+            game_key_idx = idx
+            break
+    if game_key_idx == -1:
+        game_key_idx = 1
+    game_key = argv[game_key_idx]
     if ":" not in game_key:
         raise GameNotFoundError(
             f"malformed game key {game_key!r}, "
             "expected 'store:game_id'",
             context={"game_key": game_key},
         )
-    raw_options = shlex.join(argv[2:])
+    tail = [arg for idx, arg in enumerate(argv[1:], 1) if idx != game_key_idx]
+    raw_options = shlex.join(tail)
     return game_key, raw_options
 
 
