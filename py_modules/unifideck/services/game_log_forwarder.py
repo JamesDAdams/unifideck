@@ -68,9 +68,9 @@ class GameLogForwarder:
         # Pick the newest file regardless of type
         newest = candidates[0]
         age = time.time() - newest.stat().st_mtime
-        if age > 120.0:
+        if age > 600.0:
             logger.warning(
-                "[GameLogForwarder] newest log is %.0fs old (>120s), skipping tail", age,
+                "[GameLogForwarder] newest log is %.0fs old (>600s), skipping tail", age,
             )
             return
         text = newest.read_text(encoding="utf-8", errors="replace")

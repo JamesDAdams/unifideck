@@ -507,10 +507,11 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     # through to the GE tiers instead of handing umu a Proton it cannot run.
     # (Field: 0.7.6, gog:1909524379 Call of Juarez — game never launched.)
     if is_arm():
-        # Look for installed Proton 11.0 (ARM64) or Proton Experimental (ARM64)
+        # Look for installed Proton 11.0 (ARM64) or Proton Experimental (ARM64),
+        # but only if umu can actually drive it (must have protonfixes/).
         for cand_id in ("proton_11", "proton_experimental"):
             cand = resolve_proton_path(cand_id)
-            if cand and ge_installer.is_proton_install_complete(cand):
+            if cand and ge_installer.is_proton_install_complete(cand) and _can_umu_drive(cand):
                 tried.append(f"arm64-default:{cand_id}")
                 logger.info(
                     "[launcher.proton] ARM64 host: defaulting to native "
