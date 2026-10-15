@@ -571,7 +571,7 @@ def proton_prepare(
                 else Path(proton_path)
             )
             runner_prefix_argv = [
-                str(slr_entry), "--verb=run", "--", str(proton_bin), "waitforexitandrun",
+                str(slr_entry), "--verb=run", "--", str(proton_bin), "run",
             ]
             logger.info(
                 "[launcher.proton.core] ARM64 native Proton without "
