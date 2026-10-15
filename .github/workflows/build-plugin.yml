@@ -28,8 +28,19 @@ on:
     branches:
       - main
       - staging
+    tags:
+      - "Release-*"
   pull_request:
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to upload to"
+        required: false
+        default: "Release-0.7.17"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -188,3 +199,11 @@ jobs:
           name: Unifideck
           path: out/Unifideck/
           if-no-files-found: error
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/Release-') || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
+          gh release upload "$TAG" out/Unifideck.zip --clobber
