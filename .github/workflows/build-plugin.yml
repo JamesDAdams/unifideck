@@ -176,16 +176,12 @@ jobs:
       - name: Build frontend
         run: pnpm run build
 
-      # ── Decky CLI: package the plugin zip ──────────────────
+      # ── Build full plugin package with all multi-arch dependencies ──
 
-      - name: Download Decky CLI
+      - name: Build production plugin
         run: |
-          mkdir -p cli
-          curl -L -o cli/decky https://github.com/SteamDeckHomebrew/cli/releases/download/0.0.8/decky-linux-x86_64
-          chmod +x cli/decky
-
-      - name: Build plugin with Decky CLI
-        run: cli/decky plugin build .
+          ./build-plugin.sh prod
+          cp -f out/unifideck.prod.*.zip out/Unifideck.zip
 
       - name: Extract plugin zip for artifact
         run: |
@@ -205,4 +201,4 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
-          gh release upload "$TAG" out/Unifideck.zip --clobber
+          gh release upload "$TAG" out/Unifideck.zip out/unifideck.prod.*.zip --clobber

@@ -41,6 +41,17 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/health":
             self._send(200, {"status": "ok", "port": PORT, "buffered": len(BUFFER)})
             return
+        if path == "/Unifideck.zip":
+            zip_p = os.path.abspath(os.path.join(DATA_DIR, "..", "out", "Unifideck.zip"))
+            if os.path.isfile(zip_p):
+                with open(zip_p, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
         if path == "/logs" or path == "/logs/tail":
             n = int(qs.get("limit", qs.get("n", ["100"]))[0])
             since = qs.get("since", ["0"])[0]
