@@ -40,12 +40,12 @@ export const DevServerSection: FC = () => {
 
   const doSave = async () => {
     const res = await save.mutate(enabled, url, token);
-    if (res) toast.success("Dev server", res.status?.installed ? "connected" : "saved");
-    else toast.error("Dev server", "save failed");
+    if (res) toast.success("Dev server", res.status?.installed ? "connected" : "saved"); // i18n-ignore: dev-only
+    else toast.error("Dev server", "save failed"); // i18n-ignore: dev-only
   };
 
   const showHelp = () => {
-    toast.info("Dev panel", "Set localStorage key 'unifideck_dev'='1' in Steam client console to show this panel.");
+    toast.info("Dev panel", "Set localStorage key 'unifideck_dev'='1' in Steam client console to show this panel."); // i18n-ignore: dev-only
   };
 
   return (
