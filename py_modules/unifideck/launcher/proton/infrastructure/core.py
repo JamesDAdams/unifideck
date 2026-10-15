@@ -565,13 +565,18 @@ def proton_prepare(
     if is_arm() and proton_path is not None and not _can_umu_drive(proton_path):
         slr_entry = _find_arm64_slr_entry_point()
         if slr_entry is not None:
+            proton_bin = (
+                Path(proton_path) / "proton"
+                if Path(proton_path).is_dir()
+                else Path(proton_path)
+            )
             runner_prefix_argv = [
-                str(slr_entry), "--verb=run", "--", str(proton_path), "run",
+                str(slr_entry), "--verb=waitforexitandrun", "--", str(proton_bin), "waitforexitandrun",
             ]
             logger.info(
                 "[launcher.proton.core] ARM64 native Proton without "
                 "protonfixes/ — direct SLR runner enabled via %s with %s",
-                slr_entry, proton_path,
+                slr_entry, proton_bin,
             )
         else:
             # The launch is already doomed: this Proton has no protonfixes/,
