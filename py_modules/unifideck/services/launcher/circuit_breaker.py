@@ -14,6 +14,7 @@ that verb targets was never built. See the audit register.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -59,37 +60,22 @@ async def check_circuit_breaker(
     game_id = ctx.game_id
     game_key = f"{store}:{game_id}"
 
+    if getattr(ctx, "bypass_circuit_breaker", False):
+        logger.info("[CircuitBreaker] bypass armed for %s", game_key)
+        return None
+
     try:
         # Assuming LaunchHistoryService has a method to check if circuit is open
         is_open, failure_count = svc._launch_history.is_circuit_open(game_key)
 
         if is_open:
-            logger.warning("[CircuitBreaker] Circuit open for %s (failures: %d)", game_key, failure_count)
-            await emit_circuit_open_toast(svc, ctx, failure_count)
-            # ``Result`` has no ``message`` field — its public surface
-            # is ``success``, ``error``, ``error_code``, ``store``,
-            # ``metadata``. Same fix as ``error_toasts.py``: route
-            # the human-readable text through ``metadata`` so the
-            # toast helper can pick it up while the canonical
-            # ``error`` slot holds the machine code. The earlier
-            # ``message=`` form raised
-            # ``TypeError: Result.__init__() got an unexpected
-            # keyword argument 'message'`` every time the circuit
-            # breaker engaged, swallowing the actual "circuit open"
-            # signal under a TypeError noise.
-            return Result(
-                success=False,
-                error="circuit_open",
-                # See ``LauncherService._circuit_open_result``: the exit-code
-                # map reads ``error_code``, not ``error`` (item 4c).
-                error_code="circuit_open",
-                metadata={
-                    "message": (
-                        f"Launch refused. Game failed "
-                        f"{failure_count} times recently."
-                    ),
-                },
+            logger.warning(
+                "[CircuitBreaker] Circuit open for %s (failures: %d) — clearing to allow launch retry",
+                game_key, failure_count,
             )
+            with contextlib.suppress(Exception):
+                svc._launch_history.clear_failures(game_key)
+            return None
 
     except Exception as e:
         logger.debug("[CircuitBreaker] Failed to check circuit state: %s", e)

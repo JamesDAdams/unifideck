@@ -180,10 +180,9 @@ class LaunchHistoryService(_FailuresMixin, _BypassMixin):
         if rc is None:
             return
 
-        # Ignore if terminated by signal (user cancel)
-        # Shell convention: > 128 is signal
-        if rc > 128:
-            logger.debug("[LaunchHistory] Ignoring signal termination %d for %s", rc, game_key)
+        # Ignore if circuit refusal or terminated by signal (user cancel)
+        if rc == 9 or rc > 128:
+            logger.debug("[LaunchHistory] Ignoring rc=%d for %s", rc, game_key)
             return
 
         # Non-zero exit code
