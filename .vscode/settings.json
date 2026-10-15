@@ -14,5 +14,12 @@
   "deckkey": "-i ${env:HOME}/.ssh/id_rsa",
   "deckdir": "/home/deck",
   "pluginname": "Unifideck",
-  "python.analysis.extraPaths": ["./py_modules"]
+  "python.analysis.extraPaths": [
+    "./py_modules"
+  ],
+  "i18n-ally.localesPaths": [
+    "src/i18n",
+    "src/i18n/locales",
+    "src/lib/i18n"
+  ]
 }

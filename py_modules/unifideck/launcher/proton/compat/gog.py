@@ -374,10 +374,47 @@ async def _run_gog_with_fallback(
     *, run: GameRun,
 ) -> int:
     """Run via Comet; retry the real game exe if a launcher stub bails early."""
+    # Check for curated exe override (e.g. Witcher 1 System/witcher.exe)
+    target_exe = plan.context.exe_path
+    game_id = getattr(plan.context, "game_id", None)
+    if game_id:
+        try:
+            from unifideck.launcher.proton.fixes.game_fixes import get_exe_override
+            override_rel = get_exe_override(game_id)
+            if override_rel:
+                override_full = work_dir / override_rel
+                if override_full.is_file():
+                    logger.info(
+                        "[compat.gog] applying curated exe override: %s -> %s",
+                        target_exe, override_full,
+                    )
+                    target_exe = override_full
+        except Exception:
+            logger.debug("[compat.gog] exe override check failed", exc_info=True)
+
+    # Witcher 1 registry injection (InstallFolder + Language)
+    if game_id == "1207658924":
+        try:
+            from unifideck.launcher.proton.infrastructure.setup_run import run_setup_exe
+            win_install = "Z:" + str(work_dir).replace("/", "\\")
+            for sub in ("CD Projekt Red\\The Witcher", "WOW6432Node\\CD Projekt Red\\The Witcher"):
+                await run_setup_exe(
+                    plan, "reg.exe",
+                    ["add", f"HKLM\\Software\\{sub}", "/v", "InstallFolder", "/d", win_install, "/f"],
+                    store="gog", timeout_s=10.0, label="witcher_reg",
+                )
+                await run_setup_exe(
+                    plan, "reg.exe",
+                    ["add", f"HKLM\\Software\\{sub}", "/v", "Language", "/d", "3", "/f"],
+                    store="gog", timeout_s=10.0, label="witcher_reg",
+                )
+        except Exception:
+            logger.debug("[compat.gog] witcher registry injection failed", exc_info=True)
+
     comet = start_comet(plan)
     try:
         rc = await _run_umu_exe(
-            plan, plan.context.exe_path, work_dir, on_exit=run,
+            plan, target_exe, work_dir, on_exit=run,
         )
         # ``run`` is the GameRun recorder umu itself feeds (see
         # ``infrastructure.exit_status``), so ``last_ran_for`` is the
@@ -389,7 +426,7 @@ async def _run_gog_with_fallback(
         elapsed = run.last_ran_for
         if rc != 0 and elapsed < EARLY_EXIT_SECONDS:
             fallback = resolve_fallback_exe(str(work_dir))
-            if fallback and fallback != str(plan.context.exe_path):
+            if fallback and fallback != str(target_exe):
                 logger.info(
                     "[compat.gog] launcher stub exited in %ds (rc=%d), "
                     "retrying game exe: %s", int(elapsed), rc, fallback,

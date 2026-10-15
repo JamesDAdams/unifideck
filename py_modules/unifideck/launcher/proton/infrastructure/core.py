@@ -410,6 +410,8 @@ def _apply_compat_paths(
     # one on atomic hosts.
     env.pop("STEAM_COMPAT_CLIENT_INSTALL_PATH", None)
     env["PROTON_VERB"] = "waitforexitandrun"
+    # Disable runtime update checks inside umu-run to prevent KeyError: 'steamrt4-arm64' on ARM64 hosts
+    env["UMU_RUNTIME_UPDATE"] = "0"
 
 
 def _build_umu_env(

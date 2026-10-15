@@ -137,6 +137,24 @@ class GOGExeResolver:
             (t for t in play_tasks if isinstance(t, dict) and t.get("isPrimary")),
             None,
         )
+        # If the primary task is a launcher/tool stub, look for a real game task
+        if primary and str(primary.get("category", "")).lower() in ("launcher", "tool"):
+            game_task = next(
+                (
+                    t for t in play_tasks
+                    if isinstance(t, dict)
+                    and str(t.get("category", "")).lower() == "game"
+                    and t.get("type") == "FileTask"
+                    and t.get("path")
+                ),
+                None,
+            )
+            if game_task:
+                logger.info(
+                    "[GOGExeResolver] primary task is %s stub (%s), preferring game task: %s",
+                    primary.get("category"), primary.get("path"), game_task.get("path"),
+                )
+                primary = game_task
         return primary, root_dir
 
     def _resolve_play_task_paths(
