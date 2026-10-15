@@ -366,7 +366,7 @@ def test_arm64_valve_proton_without_protonfixes_uses_direct_runner(
         slr_entry=slr,
     )
     assert plan.runner_prefix_argv == [
-        slr, "--verb=run", "--", str(proton_dir / "proton"), "run",
+        slr, "--verb=run", "--", str(proton_dir / "proton"), "waitforexitandrun",
     ]
     assert plan.build_argv("/dev/game.exe") == [
         *plan.runner_prefix_argv, "/dev/game.exe",

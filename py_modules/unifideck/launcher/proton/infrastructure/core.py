@@ -571,8 +571,10 @@ def proton_prepare(
                 else Path(proton_path)
             )
             runner_prefix_argv = [
-                str(slr_entry), "--verb=run", "--", str(proton_bin), "run",
+                str(slr_entry), "--verb=run", "--", str(proton_bin), "waitforexitandrun",
             ]
+            env["PYTHONUNBUFFERED"] = "1"
+            env["PROTON_LOG"] = "1"
             # Official Valve Proton scripts require STEAM_COMPAT_CLIENT_INSTALL_PATH
             # and STEAM_COMPAT_TOOL_PATHS in env (otherwise KeyError: STEAM_COMPAT_CLIENT_INSTALL_PATH).
             steam_client_dir = Path("~/.local/share/Steam").expanduser()
