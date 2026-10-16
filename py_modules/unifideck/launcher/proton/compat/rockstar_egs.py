@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
 
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
@@ -133,7 +134,16 @@ def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
         if cand is not None and cand.is_dir() and cand not in drive_c_candidates:
             drive_c_candidates.append(cand)
 
+    rs_dirs: list[Path] = []
+    host_docs_rs = Path.home() / "Documents" / "Rockstar Games"
+    if host_docs_rs.is_dir():
+        rs_dirs.append(host_docs_rs)
+
     for drive_c in drive_c_candidates:
+        pd_rs = drive_c / "ProgramData" / "Rockstar Games"
+        if pd_rs.is_dir():
+            rs_dirs.append(pd_rs)
+
         users_dir = drive_c / "users"
         if not users_dir.is_dir():
             continue
@@ -145,30 +155,38 @@ def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
         for user_dir in user_dirs:
             for doc_name in ("Documents", "documents", "My Documents"):
                 rs_dir = user_dir / doc_name / "Rockstar Games"
-                if not rs_dir.is_dir():
-                    continue
-                # Clean Launcher directory crash files
-                launcher_dir = rs_dir / "Launcher"
-                if launcher_dir.is_dir():
-                    for target in ("crash.log", "settings_rr.xml", "index.bin", "offline.bin"):
-                        f = launcher_dir / target
+                if rs_dir.is_dir() and rs_dir not in rs_dirs:
+                    rs_dirs.append(rs_dir)
+            for appdata_rel in (
+                ("AppData", "Local", "Rockstar Games"),
+                ("AppData", "Roaming", "Rockstar Games"),
+                ("Local Settings", "Application Data", "Rockstar Games"),
+            ):
+                appdata_rs = user_dir.joinpath(*appdata_rel)
+                if appdata_rs.is_dir() and appdata_rs not in rs_dirs:
+                    rs_dirs.append(appdata_rs)
+
+    for rs_dir in rs_dirs:
+        for folder_name in ("Launcher", "Social Club"):
+            target_dir = rs_dir / folder_name
+            if target_dir.is_dir():
+                shutil.rmtree(target_dir, ignore_errors=True)
+                logger.info("[rockstar_egs] wiped crash state dir: %s", target_dir)
+
+        # In game folders under Rockstar Games (e.g. GTAV Enhanced), delete crash/safe-mode settings
+        try:
+            for game_subdir in rs_dir.iterdir():
+                if game_subdir.is_dir() and game_subdir.name not in ("Launcher", "Social Club"):
+                    for f_name in ("settings_rr.xml", "crash.log", "settings.xml"):
+                        f = game_subdir / f_name
                         if f.is_file():
                             try:
                                 f.unlink()
-                                logger.info("[rockstar_egs] removed launcher crash artifact: %s", f)
+                                logger.info("[rockstar_egs] removed game crash artifact: %s", f)
                             except OSError:
                                 pass
-                # Clean Social Club directory crash files
-                sc_dir = rs_dir / "Social Club"
-                if sc_dir.is_dir():
-                    for target in ("crash.log", "index.bin", "settings_rr.xml"):
-                        f = sc_dir / target
-                        if f.is_file():
-                            try:
-                                f.unlink()
-                                logger.info("[rockstar_egs] removed social club crash artifact: %s", f)
-                            except OSError:
-                                pass
+        except OSError:
+            pass
 
 
 def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:

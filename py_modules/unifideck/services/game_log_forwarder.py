@@ -60,6 +60,19 @@ class GameLogForwarder:
                 for line in sl_lines[-100:]:
                     logger.error("[%s] %s", sl.name, line)
 
+        # Check for vendor client logs inside active prefixes
+        prefixes_dir = Path("~/.local/share/unifideck/prefixes").expanduser()
+        if prefixes_dir.is_dir():
+            for vlog in sorted(prefixes_dir.glob("**/Rockstar Games/**/*.log"), key=lambda p: p.stat().st_mtime, reverse=True)[:3]:
+                if time.time() - vlog.stat().st_mtime < 600.0:
+                    try:
+                        vlines = vlog.read_text(encoding="utf-8", errors="replace").splitlines()
+                        logger.info("[GameLogForwarder] Vendor log %s (%d lines)", vlog.name, len(vlines))
+                        for line in vlines[-50:]:
+                            logger.error("[%s] %s", vlog.name, line)
+                    except Exception:
+                        pass
+
         # Check /tmp/unifideck-launcher-debug.log
         debug_log = Path("/tmp/unifideck-launcher-debug.log")
         if debug_log.is_file():

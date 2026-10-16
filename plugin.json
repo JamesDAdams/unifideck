@@ -1,6 +1,6 @@
 {
   "name": "Unifideck",
-  "version": "0.7.48",
+  "version": "0.7.49",
   "main": "dist/index.js",
   "author": "numan",
   "flags": [],
