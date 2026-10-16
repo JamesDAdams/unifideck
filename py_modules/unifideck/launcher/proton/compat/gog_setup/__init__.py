@@ -51,11 +51,10 @@ logger = logging.getLogger(__name__)
 # Every affected prefix retries its redistributables exactly once on the next
 # launch. Bump again if the redist step's contract changes.
 _MARKER_NAME = ".unifideck-gog-setup-done.v4"
-# Versioned marker for the script-registry step alone. Bumped to ``.v2`` when
-# the dual-WOW64-view write landed; existing prefixes (whose only marker is the
-# heavy ``_MARKER_NAME``) re-apply their registry script once so 32-bit GOG
-# titles stop showing "Install". Bump the suffix again if the write changes.
-_REG_MARKER = ".unifideck-gog-script-reg.v2"
+# Versioned marker for the script-registry step alone. Bumped to ``.v3`` so
+# implicit GOG and Witcher registry entries (InstallFolder, TextLanguage)
+# are written to existing prefixes on next launch.
+_REG_MARKER = ".unifideck-gog-script-reg.v3"
 
 
 def _prefix_root(plan: ProtonLaunchPlan) -> Path:
@@ -127,22 +126,11 @@ async def _run_setup_scripts(
     language: str,
 ) -> None:
     """Run the v2 scriptInterpreter / temp-executable setup step, if any."""
-    if manifest.get("version") != 2:
-        return
-    try:
-        if manifest.get("scriptInterpreter"):
-            await run_script_interpreter(
-                plan, game_id, manifest, install_path, language,
-            )
-        else:
-            await run_temp_executable(
-                plan, game_id, manifest, install_path, language,
-            )
-    except Exception:
-        logger.exception(
-            "[gog_setup] setup script failed for %s — continuing to the game",
-            game_id,
-        )
+    # GUI InnoSetup installers (scriptinterpreter.exe / temp_executable) frequently
+    # fail with modal dialogs like 'Path not found' in Gaming Mode, blocking the
+    # launch. Since registry keys are applied cleanly via batch regedit, we do
+    # not invoke GUI InnoSetup stubs here.
+    return
 
 
 async def _install_redists(plan: ProtonLaunchPlan, deps: list[str]) -> bool:

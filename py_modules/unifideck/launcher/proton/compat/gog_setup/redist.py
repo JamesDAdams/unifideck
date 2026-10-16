@@ -183,6 +183,6 @@ async def install_redistributables(
         logger.info("[gog_setup] installing %s (%s)", name, dep)
         # PHYSXLEGACY ships as an .msi — drive it through msiexec.
         if dep == "PHYSXLEGACY":
-            await run_wine(plan, "msiexec", ["/i", str(exe_path), "/qb"])
+            await run_wine(plan, "msiexec", ["/i", str(exe_path), "/qb"], timeout_s=30.0)
         else:
-            await run_wine(plan, str(exe_path), args)
+            await run_wine(plan, str(exe_path), args, timeout_s=30.0)
