@@ -11,6 +11,7 @@ reads the ``Wow6432Node`` redirect — which was empty → "not installed".
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from unifideck.launcher.proton.compat.gog_setup import scripts
@@ -288,3 +289,31 @@ async def test_apply_script_registry_warns_when_batch_fails(
     # Fallback still ran: one regedit attempt + reg.exe writes afterwards.
     assert calls[0][0] == "regedit"
     assert any(exe == "reg.exe" for exe, _a in calls)
+
+
+def test_collect_implicit_gog_registry_emits_gog_and_witcher_keys(tmp_path) -> None:
+    info = {
+        "gameId": "1207658924",
+        "gameName": "The Witcher",
+        "language": "French",
+    }
+    (tmp_path / "goggame-1207658924.info").write_text(json.dumps(info))
+    (tmp_path / "System").mkdir()
+    (tmp_path / "System" / "witcher.exe").write_bytes(b"")
+
+    parsed = scripts._collect_implicit_gog_registry(str(tmp_path), "1207658924")
+    assert parsed
+    actions = parsed[0][1]
+    keys = [a["install"]["arguments"]["subkey"] for a in actions]
+    assert "Software\\GOG.com\\Games\\1207658924" in keys
+    assert "Software\\CD Projekt RED\\The Witcher" in keys
+    assert "Software\\CD Projekt RED\\Witcher\\Settings" in keys
+
+    reg_content = scripts._format_reg_file(parsed, str(tmp_path))
+    assert "[HKEY_LOCAL_MACHINE\\Software\\GOG.com\\Games\\1207658924]" in reg_content
+    assert "[HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\GOG.com\\Games\\1207658924]" in reg_content
+    assert "[HKEY_LOCAL_MACHINE\\Software\\CD Projekt RED\\The Witcher]" in reg_content
+    assert "[HKEY_LOCAL_MACHINE\\Software\\WOW6432Node\\CD Projekt RED\\The Witcher]" in reg_content
+    assert '"InstallFolder"=' in reg_content
+    assert '"TextLanguage"="11"' in reg_content
+

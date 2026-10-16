@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 # wrote this marker anyway — latching the failure for the life of the prefix.
 # Every affected prefix retries its redistributables exactly once on the next
 # launch. Bump again if the redist step's contract changes.
-_MARKER_NAME = ".unifideck-gog-setup-done.v3"
+_MARKER_NAME = ".unifideck-gog-setup-done.v4"
 # Versioned marker for the script-registry step alone. Bumped to ``.v2`` when
 # the dual-WOW64-view write landed; existing prefixes (whose only marker is the
 # heavy ``_MARKER_NAME``) re-apply their registry script once so 32-bit GOG

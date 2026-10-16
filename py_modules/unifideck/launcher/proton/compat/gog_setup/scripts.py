@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 from pathlib import Path
@@ -76,10 +77,11 @@ async def run_script_interpreter(
         return False
     kwargs: dict[str, Any] = {}
     if install_path:
-        import inspect
         sig = inspect.signature(run_wine)
         if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             kwargs["cwd"] = install_path
+    if "timeout_s" in inspect.signature(run_wine).parameters:
+        kwargs["timeout_s"] = 15.0
     success = True
     products = [p for p in (manifest.get("products", []) or []) if isinstance(p, dict) and p.get("productId")]
     for product in products:
@@ -105,10 +107,11 @@ async def run_temp_executable(
     """Run a per-product ``temp_executable`` setup (e.g. The Witcher)."""
     kwargs: dict[str, Any] = {}
     if install_path:
-        import inspect
         sig = inspect.signature(run_wine)
         if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             kwargs["cwd"] = install_path
+    if "timeout_s" in inspect.signature(run_wine).parameters:
+        kwargs["timeout_s"] = 15.0
     success = True
     ran_any = False
     products = [p for p in (manifest.get("products", []) or []) if isinstance(p, dict) and p.get("temp_executable")]
@@ -185,6 +188,115 @@ _FULL_ROOT_MAP = {
     "HKEY_CURRENT_USER": "HKEY_CURRENT_USER",
     "HKEY_CLASSES_ROOT": "HKEY_CLASSES_ROOT",
 }
+
+
+def _collect_implicit_gog_registry(install_path: str, game_id: str) -> list[tuple[str, list[Any]]]:
+    """Derive standard registry entries from goggame-*.info if present."""
+    base = Path(install_path)
+    search_dirs = [base]
+    if (base / "game").is_dir():
+        search_dirs.insert(0, base / "game")
+    actions: list[Any] = []
+    for d in search_dirs:
+        for info_file in (list(d.glob(f"goggame-{game_id}.info")) or list(d.glob("goggame-*.info"))):
+            try:
+                data = json.loads(info_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            gid = str(data.get("gameId") or game_id)
+            title = str(data.get("gameName") or data.get("name") or "")
+            root_folder = str(data.get("rootFolder") or "")
+
+            actions.append({
+                "install": {
+                    "action": "setRegistry",
+                    "arguments": {
+                        "root": "HKLM",
+                        "subkey": f"Software\\GOG.com\\Games\\{gid}",
+                        "valueName": "PATH",
+                        "valueType": "string",
+                        "valueData": "{app}\\",
+                    },
+                },
+            })
+            actions.append({
+                "install": {
+                    "action": "setRegistry",
+                    "arguments": {
+                        "root": "HKLM",
+                        "subkey": f"Software\\GOG.com\\Games\\{gid}",
+                        "valueName": "gameID",
+                        "valueType": "string",
+                        "valueData": gid,
+                    },
+                },
+            })
+            if title:
+                actions.append({
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKLM",
+                            "subkey": f"Software\\GOG.com\\Games\\{gid}",
+                            "valueName": "GAMENAME",
+                            "valueType": "string",
+                            "valueData": title,
+                        },
+                    },
+                })
+            # For legacy CD Projekt Red titles (e.g. The Witcher), witcher.exe and
+            # launcher.exe query HKLM\Software\CD Projekt RED\The Witcher\InstallFolder
+            # and HKCU\Software\CD Projekt RED\Witcher\Settings\TextLanguage.
+            data_dir = d / "Data"
+            if (d / "System" / "witcher.exe").is_file() or (data_dir.is_dir() and any(data_dir.glob("dialog_*.tlk"))):
+                actions.append({
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKLM",
+                            "subkey": "Software\\CD Projekt RED\\The Witcher",
+                            "valueName": "InstallFolder",
+                            "valueType": "string",
+                            "valueData": "{app}\\",
+                        },
+                    },
+                })
+                tw_lang_map = {
+                    "english": "3", "polish": "5", "german": "10", "french": "11",
+                    "spanish": "12", "italian": "13", "russian": "14", "czech": "15",
+                    "hungarian": "16", "chinese": "21",
+                }
+                lang_code = tw_lang_map.get(str(data.get("language") or "english").strip().lower(), "3")
+                actions.append({
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKCU",
+                            "subkey": "Software\\CD Projekt RED\\Witcher\\Settings",
+                            "valueName": "TextLanguage",
+                            "valueType": "string",
+                            "valueData": lang_code,
+                        },
+                    },
+                })
+                actions.append({
+                    "install": {
+                        "action": "setRegistry",
+                        "arguments": {
+                            "root": "HKCU",
+                            "subkey": "Software\\CD Projekt RED\\Witcher\\Settings",
+                            "valueName": "VoiceLanguage",
+                            "valueType": "string",
+                            "valueData": lang_code,
+                        },
+                    },
+                })
+            break
+        if actions:
+            break
+    return [("implicit_gog_info", actions)] if actions else []
 
 
 def _format_reg_file(
@@ -283,6 +395,11 @@ async def apply_script_registry(
     parsed = await asyncio.to_thread(
         _load_script_actions, install_path, game_id,
     )
+    implicit = await asyncio.to_thread(
+        _collect_implicit_gog_registry, install_path, game_id,
+    )
+    if implicit:
+        parsed.extend(implicit)
     if not parsed:
         return
 
