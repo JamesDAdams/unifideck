@@ -123,7 +123,7 @@ async def _run_epic_registry(plan: ProtonLaunchPlan) -> None:
 
     config_path = resolve_legendary_config_path()
     try:
-        await setup_registry(plan, plan.context.game_id, config_path)
+        await setup_registry(plan, plan.context.game_id, Path(config_path))
     except Exception:
         logger.exception(
             "[launcher.proton.epic] registry setup crashed (non-fatal)",

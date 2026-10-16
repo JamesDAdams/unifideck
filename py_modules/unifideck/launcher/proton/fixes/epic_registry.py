@@ -41,12 +41,12 @@ def _linux_to_wine_path(linux_path: str) -> str:
     return wine_path
 
 def _load_installed_json(
-    legendary_config: Path,
+    legendary_config: Path | str,
     game_id: str,
 ) -> dict[str, Any] | None:
 
     """Load installed JSON."""
-    installed_json = legendary_config / "installed.json"
+    installed_json = Path(legendary_config) / "installed.json"
     if not installed_json.is_file():
         logger.error(
             "[epic_registry] installed.json not found at %s",
@@ -151,9 +151,13 @@ def _resolve_install_paths(
     if not install_path:
         return None
     wine_install_path = _linux_to_wine_path(install_path)
-    launch_params = app.get("launch_parameters", "") or ""
-    uplay_match = _UPLAY_ID_RE.search(launch_params)
-    uplay_id = uplay_match.group(1) if uplay_match else None
+    uplay_id = None
+    for k in ("launch_parameters", "egl_parameters", "parameters", "executable"):
+        val = str(app.get(k) or "")
+        match = _UPLAY_ID_RE.search(val)
+        if match:
+            uplay_id = match.group(1)
+            break
     return wine_install_path, uplay_id
 
 def _error_result(reason: str) -> RegistryInjectionResult:
@@ -173,57 +177,62 @@ def _sync_direct_registry_files(
     from unifideck.launcher.proton.infrastructure.prefix_layout import (
         resolve_registry_prefix,
     )
-    registry_root = resolve_registry_prefix(plan.prefix_path)
-    system_reg = registry_root / "system.reg"
-    user_reg = registry_root / "user.reg"
+    registry_roots = {
+        resolve_registry_prefix(plan.prefix_path),
+        Path(plan.prefix_path),
+        Path(plan.prefix_path) / "pfx",
+    }
     escaped_wine_path = wine_install_path.replace("\\", "\\\\")
 
-    if system_reg.is_file():
-        try:
-            content = system_reg.read_text(encoding="utf-8", errors="replace")
-            to_append = ""
-            if uplay_id:
-                marker = f"[Software\\\\WOW6432Node\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]"
-                if marker not in content:
+    for registry_root in registry_roots:
+        system_reg = registry_root / "system.reg"
+        if system_reg.is_file():
+            try:
+                content = system_reg.read_text(encoding="utf-8", errors="replace")
+                to_append = ""
+                if uplay_id:
+                    marker = f"[Software\\\\WOW6432Node\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]"
+                    if marker not in content:
+                        to_append += (
+                            f"\n[Software\\\\WOW6432Node\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]\n"
+                            f'"InstallDir"="{escaped_wine_path}"\n'
+                            f'"Language"="en-US"\n'
+                            f"\n[Software\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]\n"
+                            f'"InstallDir"="{escaped_wine_path}"\n'
+                            f'"Language"="en-US"\n'
+                        )
+                epic_marker = f"[Software\\\\WOW6432Node\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]"
+                if epic_marker not in content:
                     to_append += (
-                        f"\n[Software\\\\WOW6432Node\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]\n"
-                        f'"InstallDir"="{escaped_wine_path}"\n'
-                        f'"Language"="en-US"\n'
-                        f"\n[Software\\\\Ubisoft\\\\Launcher\\\\Installs\\\\{uplay_id}]\n"
-                        f'"InstallDir"="{escaped_wine_path}"\n'
-                        f'"Language"="en-US"\n'
+                        f"\n[Software\\\\WOW6432Node\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]\n"
+                        f'"InstallLocation"="{escaped_wine_path}"\n'
                     )
-            epic_marker = f"[Software\\\\WOW6432Node\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]"
-            if epic_marker not in content:
-                to_append += (
-                    f"\n[Software\\\\WOW6432Node\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]\n"
-                    f'"InstallLocation"="{escaped_wine_path}"\n'
-                )
-            if to_append:
-                system_reg.write_text(content + to_append, encoding="utf-8")
-                logger.info("[epic_registry] wrote install keys directly to system.reg")
-        except OSError:
-            logger.warning("[epic_registry] failed direct write to system.reg", exc_info=True)
+                if to_append:
+                    system_reg.write_text(content + to_append, encoding="utf-8")
+                    logger.info("[epic_registry] wrote install keys directly to %s", system_reg)
+            except OSError:
+                logger.warning("[epic_registry] failed direct write to %s", system_reg, exc_info=True)
 
-    if user_reg.is_file():
-        try:
-            content = user_reg.read_text(encoding="utf-8", errors="replace")
-            epic_user_marker = f"[Software\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]"
-            if epic_user_marker not in content:
-                to_append = (
-                    f"\n[Software\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]\n"
-                    f'"InstallLocation"="{escaped_wine_path}"\n'
-                )
-                user_reg.write_text(content + to_append, encoding="utf-8")
-                logger.info("[epic_registry] wrote install keys directly to user.reg")
-        except OSError:
-            logger.warning("[epic_registry] failed direct write to user.reg", exc_info=True)
+        user_reg = registry_root / "user.reg"
+        if user_reg.is_file():
+            try:
+                content = user_reg.read_text(encoding="utf-8", errors="replace")
+                epic_user_marker = f"[Software\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]"
+                if epic_user_marker not in content:
+                    to_append = (
+                        f"\n[Software\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\{game_id}]\n"
+                        f'"InstallLocation"="{escaped_wine_path}"\n'
+                    )
+                    user_reg.write_text(content + to_append, encoding="utf-8")
+                    logger.info("[epic_registry] wrote install keys directly to %s", user_reg)
+            except OSError:
+                logger.warning("[epic_registry] failed direct write to %s", user_reg, exc_info=True)
 
 
 async def setup_registry(
     plan: ProtonLaunchPlan,
     game_id: str,
-    legendary_config: Path,
+    legendary_config: Path | str,
 ) -> RegistryInjectionResult:
     """Write the Epic/Uplay install keys into the plan's prefix.
 
