@@ -114,6 +114,22 @@ async def _run_epic_prerequisites(plan: ProtonLaunchPlan) -> None:
         )
 
 
+async def _run_epic_registry(plan: ProtonLaunchPlan) -> None:
+    """Run epic registry."""
+    from unifideck.launcher.proton.compat.epic import (
+        resolve_legendary_config_path,
+    )
+    from unifideck.launcher.proton.fixes.epic_registry import setup_registry
+
+    config_path = resolve_legendary_config_path()
+    try:
+        await setup_registry(plan, plan.context.game_id, config_path)
+    except Exception:
+        logger.exception(
+            "[launcher.proton.epic] registry setup crashed (non-fatal)",
+        )
+
+
 async def epic_launch(plan: ProtonLaunchPlan) -> int:
 
     """Epic launch."""
@@ -125,6 +141,7 @@ async def epic_launch(plan: ProtonLaunchPlan) -> int:
     )
     cleanup_epic_artifacts(plan)
     await _run_epic_prerequisites(plan)
+    await _run_epic_registry(plan)
     # Rockstar-on-Epic (RDR2/GTA5) only: fake EpicGamesLauncher.exe + the
     # com.epicgames.launcher protocol handler. No-op for every other Epic
     # title (gated on the umu id), so the standard flow is unchanged.

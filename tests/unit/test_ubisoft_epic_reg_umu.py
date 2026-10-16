@@ -254,3 +254,34 @@ async def test_shared_proton_dlls_survive_the_fix(tmp_path, monkeypatch):
 
     assert real_dll.read_bytes() == before
     assert real_dll.stat().st_size == 4098
+
+
+@pytest.mark.asyncio
+async def test_setup_registry_writes_direct_system_and_user_reg(tmp_path, monkeypatch):
+    prefix = _make_prefix(tmp_path)
+    system_reg = prefix / "system.reg"
+    system_reg.write_text("WINE REGISTRY Version 2\n", encoding="utf-8")
+    user_reg = prefix / "user.reg"
+    user_reg.write_text("WINE REGISTRY Version 2\n", encoding="utf-8")
+
+    config = tmp_path / "legendary"
+    config.mkdir()
+    (config / "installed.json").write_text(
+        '{"Jasper": {"install_path": "/games/WatchDogs",'
+        ' "launch_parameters": "-UplayId=274"}}',
+    )
+    rec = _Recorder()
+    monkeypatch.setattr(epic_registry, "run_setup_exe", rec)
+    await epic_registry.setup_registry(
+        plan=_plan(prefix), game_id="Jasper", legendary_config=config,
+    )
+
+    sys_text = system_reg.read_text(encoding="utf-8")
+    assert "[Software\\\\WOW6432Node\\\\Ubisoft\\\\Launcher\\\\Installs\\\\274]" in sys_text
+    assert "[Software\\\\Ubisoft\\\\Launcher\\\\Installs\\\\274]" in sys_text
+    assert '"InstallDir"="Z:\\\\games\\\\WatchDogs\\\\"' in sys_text
+
+    user_text = user_reg.read_text(encoding="utf-8")
+    assert "[Software\\\\Epic Games\\\\EpicGamesLauncher\\\\Manifests\\\\Jasper]" in user_text
+    assert '"InstallLocation"="Z:\\\\games\\\\WatchDogs\\\\"' in user_text
+
