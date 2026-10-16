@@ -127,6 +127,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     host = os.environ.get("DECKY_DEV_SERVER_HOST", "0.0.0.0")
+    ThreadingHTTPServer.allow_reuse_address = True
     httpd = ThreadingHTTPServer((host, PORT), _Handler)
     print(f"=== Dev server listening on {host}:{PORT} ===", flush=True)
     if os.path.isfile(LOG_FILE):
