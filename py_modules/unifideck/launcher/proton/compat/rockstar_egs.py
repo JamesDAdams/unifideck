@@ -40,6 +40,7 @@ enables story mode only.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
@@ -63,7 +64,7 @@ LAUNCH_SHIM_NAME = "unifideck-rockstar-launch.bat"
 # title and silently does nothing), and ``%*`` forwards any game args
 # legendary appends. Single LF endings, matching the file that was verified
 # working on-device.
-_LAUNCH_SHIM_TEMPLATE = 'start "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\n'
+_LAUNCH_SHIM_TEMPLATE = 'set SteamDeck=1\r\nstart "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\r\n'
 # Wine .reg block that registers the com.epicgames.launcher URL protocol
 # so the Rockstar launcher's Epic handoff resolves. Mirrors Heroic's
 # ``reg add HKEY_CLASSES_ROOT\com.epicgames.launcher /f``.
@@ -99,6 +100,10 @@ def apply_rockstar_egs_setup(plan: ProtonLaunchPlan) -> None:
         plan.context.game_key, plan.state.umu_id,
     )
     try:
+        _clean_rockstar_crash_state(plan)
+    except Exception:
+        logger.exception("[rockstar_egs] crash state cleanup failed")
+    try:
         _copy_fake_launcher(plan)
     except Exception:
         logger.exception("[rockstar_egs] fake-launcher copy failed")
@@ -114,6 +119,56 @@ def apply_rockstar_egs_setup(plan: ProtonLaunchPlan) -> None:
         _register_epic_protocol(plan)
     except Exception:
         logger.exception("[rockstar_egs] protocol registration failed")
+    try:
+        _register_steamdeck_env(plan)
+    except Exception:
+        logger.exception("[rockstar_egs] SteamDeck env registration failed")
+
+
+def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
+    """Remove Rockstar Games Launcher crash state and logs to break 'exited unexpectedly' loop."""
+    prefix_root = normalize_prefix_root(plan.prefix_path)
+    drive_c_candidates: list[Path] = []
+    for cand in (prefix_root / "drive_c", prefix_root / "pfx" / "drive_c", resolve_drive_c(plan.prefix_path)):
+        if cand is not None and cand.is_dir() and cand not in drive_c_candidates:
+            drive_c_candidates.append(cand)
+
+    for drive_c in drive_c_candidates:
+        users_dir = drive_c / "users"
+        if not users_dir.is_dir():
+            continue
+        try:
+            user_dirs = [u for u in users_dir.iterdir() if u.is_dir() and u.name.lower() != "public"]
+        except OSError:
+            continue
+
+        for user_dir in user_dirs:
+            for doc_name in ("Documents", "documents", "My Documents"):
+                rs_dir = user_dir / doc_name / "Rockstar Games"
+                if not rs_dir.is_dir():
+                    continue
+                # Clean Launcher directory crash files
+                launcher_dir = rs_dir / "Launcher"
+                if launcher_dir.is_dir():
+                    for target in ("crash.log", "settings_rr.xml", "index.bin", "offline.bin"):
+                        f = launcher_dir / target
+                        if f.is_file():
+                            try:
+                                f.unlink()
+                                logger.info("[rockstar_egs] removed launcher crash artifact: %s", f)
+                            except OSError:
+                                pass
+                # Clean Social Club directory crash files
+                sc_dir = rs_dir / "Social Club"
+                if sc_dir.is_dir():
+                    for target in ("crash.log", "index.bin", "settings_rr.xml"):
+                        f = sc_dir / target
+                        if f.is_file():
+                            try:
+                                f.unlink()
+                                logger.info("[rockstar_egs] removed social club crash artifact: %s", f)
+                            except OSError:
+                                pass
 
 
 def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:
@@ -121,22 +176,22 @@ def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:
     if install_dir is None:
         return
     cmd_file = install_dir / "commandline.txt"
-    needed_args = ["-nobattleye", "-onSteamDeck"]
+    needed_args = ["-nobattleye", "-onSteamDeck", "-scofflineonly"]
     existing = ""
     if cmd_file.is_file():
         try:
             existing = cmd_file.read_text(encoding="utf-8", errors="replace")
         except OSError:
             existing = ""
-    lines = [line.strip() for line in existing.splitlines() if line.strip()]
+    tokens = [t.strip() for t in existing.split() if t.strip()]
     modified = False
     for arg in needed_args:
-        if not any(arg.lower() == line.lower() for line in lines):
-            lines.append(arg)
+        if not any(arg.lower() == t.lower() for t in tokens):
+            tokens.append(arg)
             modified = True
-    if modified or not cmd_file.is_file():
+    if modified or not cmd_file.is_file() or "\r\n" not in existing:
         try:
-            cmd_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            cmd_file.write_text(" ".join(tokens) + "\r\n", encoding="utf-8")
             logger.info("[rockstar_egs] updated %s with %s", cmd_file, needed_args)
         except OSError:
             logger.warning("[rockstar_egs] failed to write %s", cmd_file, exc_info=True)
@@ -274,3 +329,63 @@ def _register_epic_protocol(plan: ProtonLaunchPlan) -> None:
         return
     user_reg.write_text(content + to_append, encoding="utf-8")
     logger.info("[rockstar_egs] registered com.epicgames.launcher protocol")
+
+
+def _inject_registry_value(reg_file: Path, section_name: str, key_name: str, key_value: str) -> None:
+    """Ensure key_name=key_value is set in section_name of a Wine .reg file."""
+    if not reg_file.is_file():
+        return
+    try:
+        content = reg_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+
+    sec_header = f"[{section_name}]"
+    entry_line = f'"{key_name}"="{key_value}"'
+
+    if sec_header in content:
+        start = content.find(sec_header)
+        next_sec = content.find("\n[", start + len(sec_header))
+        sec_body = content[start:next_sec] if next_sec != -1 else content[start:]
+        if f'"{key_name}"=' in sec_body:
+            if entry_line in sec_body:
+                return
+            new_sec_body = re.sub(rf'"{re.escape(key_name)}"=.*', entry_line, sec_body)
+            new_content = content[:start] + new_sec_body + (content[next_sec:] if next_sec != -1 else "")
+            reg_file.write_text(new_content, encoding="utf-8")
+        else:
+            insert_pos = start + len(sec_header)
+            new_content = content[:insert_pos] + "\n" + entry_line + content[insert_pos:]
+            reg_file.write_text(new_content, encoding="utf-8")
+    else:
+        new_content = content.rstrip() + f"\n\n[{section_name}]\n{entry_line}\n"
+        reg_file.write_text(new_content, encoding="utf-8")
+
+
+def _register_steamdeck_env(plan: ProtonLaunchPlan) -> None:
+    """Register SteamDeck=1 in both user.reg and system.reg so all Windows child processes inherit it."""
+    prefix_root = normalize_prefix_root(plan.prefix_path)
+    reg_roots = [prefix_root]
+    r2 = resolve_registry_prefix(plan.prefix_path)
+    if r2 not in reg_roots:
+        reg_roots.append(r2)
+    pfx_dir = prefix_root / "pfx"
+    if pfx_dir.is_dir() and pfx_dir not in reg_roots:
+        reg_roots.append(pfx_dir)
+
+    for root in reg_roots:
+        user_reg = root / "user.reg"
+        if user_reg.is_file():
+            _inject_registry_value(user_reg, "Environment", "SteamDeck", "1")
+            logger.info("[rockstar_egs] injected SteamDeck=1 into %s", user_reg)
+
+        system_reg = root / "system.reg"
+        if system_reg.is_file():
+            _inject_registry_value(
+                system_reg,
+                "System\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment",
+                "SteamDeck",
+                "1",
+            )
+            logger.info("[rockstar_egs] injected SteamDeck=1 into %s", system_reg)
+

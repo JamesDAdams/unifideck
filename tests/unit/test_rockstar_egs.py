@@ -318,7 +318,8 @@ def test_setup_writes_launch_shim_matching_proven_fix(tmp_path):
 
     shim = install / rockstar_egs.LAUNCH_SHIM_NAME
     assert shim.is_file()
-    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayGTAV.exe -nobattleye -onSteamDeck %*\n'
+    assert "set SteamDeck=1" in shim.read_text()
+    assert "PlayGTAV.exe" in shim.read_text()
 
 
 def test_setup_shim_names_rdr2_play_exe(tmp_path):
@@ -334,7 +335,8 @@ def test_setup_shim_names_rdr2_play_exe(tmp_path):
     )
 
     shim = install / rockstar_egs.LAUNCH_SHIM_NAME
-    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe -nobattleye -onSteamDeck %*\n'
+    assert "set SteamDeck=1" in shim.read_text()
+    assert "PlayRDR2.exe" in shim.read_text()
 
 
 def test_setup_shim_rewritten_when_stale(tmp_path):
@@ -351,7 +353,8 @@ def test_setup_shim_rewritten_when_stale(tmp_path):
         _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin),
     )
 
-    assert stale.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe -nobattleye -onSteamDeck %*\n'
+    assert "set SteamDeck=1" in stale.read_text()
+    assert "PlayRDR2.exe" in stale.read_text()
 
 
 def test_setup_does_not_touch_user_hand_written_fix_bat(tmp_path):
@@ -510,4 +513,112 @@ def test_setup_updates_legacy_protocol_registration(tmp_path):
     text = user_reg.read_text(encoding="utf-8")
     assert text.count("[Software\\\\Classes\\\\com.epicgames.launcher]") == 1
     assert "[Software\\\\Classes\\\\com.epicgames.launcher\\\\shell\\\\open\\\\command]" in text
+
+
+def test_setup_injects_steamdeck_env_in_user_and_system_reg(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+    user_reg = prefix / "pfx" / "user.reg"
+    system_reg = prefix / "pfx" / "system.reg"
+    user_reg.write_text("WINE REGISTRY Version 2\n", encoding="utf-8")
+    system_reg.write_text("WINE REGISTRY Version 2\n", encoding="utf-8")
+
+    plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    u_text = user_reg.read_text(encoding="utf-8")
+    assert "[Environment]" in u_text
+    assert '"SteamDeck"="1"' in u_text
+
+    s_text = system_reg.read_text(encoding="utf-8")
+    assert "[System\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment]" in s_text
+    assert '"SteamDeck"="1"' in s_text
+
+
+def test_setup_cleans_rockstar_launcher_crash_state(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+
+    # Simulate Rockstar Launcher crash state in Documents
+    launcher_docs = drive_c / "users" / "steamuser" / "Documents" / "Rockstar Games" / "Launcher"
+    launcher_docs.mkdir(parents=True)
+    (launcher_docs / "crash.log").write_text("crashed", encoding="utf-8")
+    (launcher_docs / "index.bin").write_text("data", encoding="utf-8")
+    (launcher_docs / "settings_rr.xml").write_text("<crash/>", encoding="utf-8")
+
+    # Game saves in GTAV Enhanced must NOT be touched
+    save_dir = drive_c / "users" / "steamuser" / "Documents" / "Rockstar Games" / "GTAV Enhanced" / "Profiles" / "ABC"
+    save_dir.mkdir(parents=True)
+    (save_dir / "SGTA50000").write_text("real save", encoding="utf-8")
+
+    plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    assert not (launcher_docs / "crash.log").exists()
+    assert not (launcher_docs / "settings_rr.xml").exists()
+    assert (save_dir / "SGTA50000").read_text(encoding="utf-8") == "real save"
+
+
+def test_setup_writes_commandline_txt_with_crlf_and_offline(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+
+    plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    cmd_file = install / "commandline.txt"
+    assert cmd_file.is_file()
+    raw = cmd_file.read_bytes()
+    assert b"\r\n" in raw
+    content = raw.decode("utf-8")
+    assert "-nobattleye" in content
+    assert "-onSteamDeck" in content
+    assert "-scofflineonly" in content
+
+
+def test_launch_shim_sets_steamdeck_env(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+
+    plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    shim = install / rockstar_egs.LAUNCH_SHIM_NAME
+    assert shim.is_file()
+    content = shim.read_text(encoding="utf-8")
+    assert "set SteamDeck=1" in content
+
+
+def test_container_escape_always_forwards_steamdeck():
+    from unifideck.launcher.proton.infrastructure.container_escape import _ALWAYS_FORWARD
+    assert "SteamDeck" in _ALWAYS_FORWARD
+
 

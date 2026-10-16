@@ -74,6 +74,7 @@ _ALWAYS_FORWARD = frozenset({
     # ``_forwarded_env`` drops it as "unchanged" and the escaped process is
     # left with the container's copy. Written by ``steam.window_env``.
     "STEAM_COMPAT_APP_ID",
+    "SteamDeck",
 })
 
 
