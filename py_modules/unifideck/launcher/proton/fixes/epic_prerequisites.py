@@ -41,7 +41,7 @@ _UBISOFT_CONNECT_INSTALLER_URL = (
     "https://static3.cdn.ubi.com/orbit/launcher_installer/UbisoftConnectInstaller.exe"
 )
 _UBISOFT_CONNECT_REL = (
-    "Program Files (x86)/Ubisoft/Ubisoft Game Launcher/upc.exe"
+    "Program Files (x86)/Ubisoft/Ubisoft Game Launcher/UbisoftConnect.exe"
 )
 _UBISOFT_REGISTRY_BLOCK = (
     "\n[Software\\\\Wow6432Node\\\\Ubisoft\\\\Launcher]\n"
@@ -69,6 +69,16 @@ def _is_ubisoft_connect_installed(prefix_root: Path) -> bool:
     return any(c.is_file() for c in candidates)
 
 
+def _purge_obsolete_uplay(prefix_root: Path) -> None:
+    import shutil
+
+    for drive_c in [prefix_root / "drive_c", prefix_root / "pfx" / "drive_c"]:
+        ubi_dir = drive_c / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher"
+        if ubi_dir.is_dir() and not (ubi_dir / "UbisoftConnect.exe").is_file():
+            shutil.rmtree(ubi_dir, ignore_errors=True)
+            logger.info("[epic_prerequisites] purged obsolete Uplay directory")
+
+
 def _ensure_ubisoft_registry_keys(prefix_root: Path) -> None:
     from unifideck.launcher.proton.infrastructure.prefix_layout import (
         resolve_registry_prefix,
@@ -86,7 +96,7 @@ def _try_copy_from_ubisoft_template(prefix_root: Path) -> bool:
     import shutil
     template = Path("~/.local/share/unifideck/prefixes/ubisoft/.template").expanduser()
     src = template / "drive_c" / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher"
-    if not (src / "upc.exe").is_file():
+    if not (src / "UbisoftConnect.exe").is_file():
         return False
     drive_c = prefix_root / "drive_c"
     if not drive_c.is_dir() and (prefix_root / "pfx" / "drive_c").is_dir():
@@ -162,7 +172,6 @@ async def apply_epic_prerequisites(plan: ProtonLaunchPlan) -> bool:
     prefix_root = normalize_prefix_root(plan.prefix_path)
     new_marker, legacy_marker = _get_marker_paths(game_id, prefix_root)
     if new_marker.is_file() or legacy_marker.is_file():
-        marker_file = new_marker if new_marker.is_file() else legacy_marker
         prereq = _get_prereq_info(game_id)
         is_uplay = prereq is not None and _is_uplay_prereq(prereq)
         if is_uplay and not _is_ubisoft_connect_installed(prefix_root):
@@ -171,7 +180,9 @@ async def apply_epic_prerequisites(plan: ProtonLaunchPlan) -> bool:
                 game_id,
             )
             with contextlib.suppress(OSError):
-                marker_file.unlink()
+                new_marker.unlink()
+            with contextlib.suppress(OSError):
+                legacy_marker.unlink()
         else:
             logger.debug(
                 "[epic_prerequisites] %s: marker present, skipping",
@@ -196,6 +207,8 @@ async def apply_epic_prerequisites(plan: ProtonLaunchPlan) -> bool:
                 game_id,
             )
             return True
+
+        _purge_obsolete_uplay(prefix_root)
 
         if _try_copy_from_ubisoft_template(prefix_root):
             _write_marker_sync(new_marker, body="ubisoft connect copied from template")
@@ -338,6 +351,7 @@ async def _run_prerequisite(
         if _is_ubisoft_connect_installed(prefix_root):
             _ensure_ubisoft_registry_keys(prefix_root)
             return True
+        _purge_obsolete_uplay(prefix_root)
         if _try_copy_from_ubisoft_template(prefix_root):
             return True
         installer = await _ensure_ubisoft_connect_installer()

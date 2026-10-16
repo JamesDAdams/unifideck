@@ -90,7 +90,7 @@ async def test_apply_epic_prerequisites_upgrades_uplay_prereq_to_ubisoft_connect
 @pytest.mark.asyncio
 async def test_apply_epic_prerequisites_skips_when_ubisoft_connect_already_installed(tmp_path: Path):
     prefix = tmp_path / "prefix"
-    upc = prefix / "drive_c" / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher" / "upc.exe"
+    upc = prefix / "drive_c" / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher" / "UbisoftConnect.exe"
     upc.parent.mkdir(parents=True)
     upc.write_bytes(b"MZ-upc")
     assert _is_ubisoft_connect_installed(prefix) is True
@@ -141,9 +141,14 @@ async def test_apply_epic_prerequisites_skips_when_ubisoft_connect_already_insta
 
 
 @pytest.mark.asyncio
-async def test_apply_epic_prerequisites_recovers_from_stale_skipped_marker(tmp_path: Path):
+async def test_apply_epic_prerequisites_purges_obsolete_uplay_without_ubisoft_connect(tmp_path: Path):
     prefix = tmp_path / "prefix"
-    (prefix / "drive_c").mkdir(parents=True)
+    ubi_dir = prefix / "drive_c" / "Program Files (x86)" / "Ubisoft" / "Ubisoft Game Launcher"
+    ubi_dir.mkdir(parents=True)
+    (ubi_dir / "upc.exe").write_bytes(b"MZ-old-2014-uplay")
+    (ubi_dir / "Uplay.exe").write_bytes(b"MZ-old-2014-uplay")
+    assert _is_ubisoft_connect_installed(prefix) is False
+
     install = tmp_path / "install"
     install.mkdir()
     fake_installer = tmp_path / "UbisoftConnectInstaller.exe"
@@ -178,7 +183,7 @@ async def test_apply_epic_prerequisites_recovers_from_stale_skipped_marker(tmp_p
 
     from unifideck.launcher.proton.fixes.epic_prerequisites import _get_marker_paths
     new_marker, _ = _get_marker_paths("Jasper", prefix)
-    new_marker.write_text("skipped: Uplay", encoding="utf-8")
+    new_marker.write_text("installed: Uplay", encoding="utf-8")
 
     with patch(
         "unifideck.launcher.proton.fixes.epic_prerequisites._find_legendary_installed_json",
@@ -196,6 +201,7 @@ async def test_apply_epic_prerequisites_recovers_from_stale_skipped_marker(tmp_p
 
     assert ok is True
     mock_spawn.assert_called_once()
+    assert not (ubi_dir / "Uplay.exe").exists()
     marker = list(prefix.glob(".unifideck_prereqs_Jasper_*.done"))
     assert len(marker) == 1
     assert "installed: Ubisoft Connect" in marker[0].read_text()
