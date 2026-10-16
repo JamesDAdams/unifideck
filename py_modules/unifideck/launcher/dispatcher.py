@@ -199,6 +199,22 @@ async def _resolve_game_exe(
                 game_key, resolved,
             )
             exe = resolved
+    if (
+        store == "gog"
+        and work_dir
+        and Path(exe).name.lower() in ("launcher.exe", "launch.exe", "autorun.exe")
+    ):
+        try:
+            from unifideck.launcher.proton.compat.gog import resolve_fallback_exe
+            fallback = resolve_fallback_exe(work_dir)
+            if fallback and fallback != exe:
+                logger.info(
+                    "[launcher.dispatcher] bypassing launcher stub in games.map for %s: %s → %s",
+                    game_key, exe, fallback,
+                )
+                exe = fallback
+        except Exception:
+            logger.debug("[launcher.dispatcher] fallback exe resolve failed for %s", game_key, exc_info=True)
     return exe, work_dir, has_entry, app_id
 
 

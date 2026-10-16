@@ -105,8 +105,41 @@ async def test_fallback_exe_runs_single_attempt(gog_harness):
 
 
 async def test_no_fallback_when_primary_succeeds(gog_harness):
-    """rc=0 primary → no fallback consulted."""
-    gog_harness.script(codes=[0], elapsed=2, fallback="/games/x/game.exe")
+    """rc=0 primary (real game binary) → no fallback consulted."""
+    gog_harness.script(codes=[0], elapsed=2, fallback="/games/x/fallback.exe")
+    plan = _make_plan("/games/x/game.exe")
+
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())
+
+    assert rc == 0
+    assert gog_harness.calls() == [("game.exe", 2)]
+
+
+async def test_fallback_when_stub_exits_zero_early(gog_harness):
+    """Launcher stub exiting rc=0 in <EARLY_EXIT_SECONDS must trigger fallback."""
+    gog_harness.script(
+        codes=[0, 0],  # stub exits 0, fallback succeeds
+        elapsed=4.6,  # < EARLY_EXIT_SECONDS (exact Witcher scenario)
+        fallback="/games/x/game.exe",
+    )
+    plan = _make_plan("/games/x/launcher.exe")
+
+    rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())
+
+    assert rc == 0
+    assert gog_harness.calls() == [
+        ("launcher.exe", 2),
+        ("game.exe", 1),
+    ]
+
+
+async def test_no_fallback_when_stub_runs_long_enough(gog_harness):
+    """Launcher stub exiting 0 after running >= EARLY_EXIT_SECONDS is left alone."""
+    gog_harness.script(
+        codes=[0],
+        elapsed=gog.EARLY_EXIT_SECONDS + 5,
+        fallback="/games/x/game.exe",
+    )
     plan = _make_plan("/games/x/launcher.exe")
 
     rc = await gog._run_gog_with_fallback(plan, Path("/games/x"), run=GameRun())

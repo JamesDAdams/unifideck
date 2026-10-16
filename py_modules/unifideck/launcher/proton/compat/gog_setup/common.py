@@ -135,6 +135,7 @@ def cast_dict(value: Any) -> dict[str, Any] | None:
 async def run_wine(
     plan: ProtonLaunchPlan, exe: str, args: list[str],
     *, timeout_s: float | None = None,
+    cwd: str | None = None,
 ) -> bool:
     """Run a Windows exe in the game's prefix via umu. True on rc 0.
 
@@ -158,9 +159,17 @@ async def run_wine(
     whole session — and because ``run_setup_exe`` kills the process group
     on expiry, the prefix is not left holding a live wineserver either.
     """
+    kwargs: dict[str, Any] = {}
+    if cwd is not None:
+        import inspect
+        sig = inspect.signature(run_setup_exe)
+        if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs["cwd"] = cwd
+
     return await run_setup_exe(
         plan, exe, args,
         store="gog",
         timeout_s=SETUP_TIMEOUT_S if timeout_s is None else timeout_s,
         label="gog_setup",
+        **kwargs,
     )

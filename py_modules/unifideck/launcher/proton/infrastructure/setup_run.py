@@ -37,7 +37,7 @@ import asyncio
 import contextlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from unifideck.launcher.proton.infrastructure.container_escape import escape_argv
 from unifideck.launcher.proton.infrastructure.setup_env import build_setup_env
@@ -56,6 +56,7 @@ async def run_setup_exe(
     store: str | None = None,
     timeout_s: float | None = None,
     label: str = "setup_run",
+    cwd: str | None = None,
 ) -> bool:
     """Run ``exe`` in the plan's prefix via umu. True on rc 0.
 
@@ -80,11 +81,15 @@ async def run_setup_exe(
     if not getattr(plan, "runner_prefix_argv", None):
         cmd = escape_argv(cmd, env, None)
     logger.info("[%s] run: %s %s", label, Path(exe).name, " ".join(args[:4]))
+    kwargs: dict[str, Any] = {}
+    if cwd is not None:
+        kwargs["cwd"] = cwd
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, env=env,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
+            **kwargs,
         )
     except OSError as e:
         logger.warning("[%s] failed to spawn %s: %s", label, exe, e)

@@ -45,7 +45,8 @@ def _setup_args(
     """Build the GOG silent-setup arg list (Heroic setup.ts)."""
     name = language_name(lang)
     win_install = _win_path(install_path)
-    win_support = _win_path(str(SUPPORT_DIR / product_id))
+    game_id = str(manifest.get("gameId") or manifest.get("game_id") or product_id)
+    win_support = _win_path(str(SUPPORT_DIR / game_id))
     return [
         "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES",
         f"/DIR={win_install}",
@@ -67,12 +68,19 @@ async def run_script_interpreter(
     if not isi.is_file():
         logger.warning("[gog_setup] scriptinterpreter.exe missing")
         return
+    kwargs: dict[str, Any] = {}
+    if install_path:
+        import inspect
+        sig = inspect.signature(run_wine)
+        if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs["cwd"] = install_path
     for product in manifest.get("products", []) or []:
         pid = product.get("productId") if isinstance(product, dict) else None
         if not pid:
             continue
         await run_wine(
             plan, str(isi), _setup_args(manifest, pid, install_path, lang),
+            **kwargs,
         )
 
 
@@ -81,6 +89,12 @@ async def run_temp_executable(
     manifest: dict[str, Any], install_path: str, lang: str,
 ) -> None:
     """Run a per-product ``temp_executable`` setup (e.g. The Witcher)."""
+    kwargs: dict[str, Any] = {}
+    if install_path:
+        import inspect
+        sig = inspect.signature(run_wine)
+        if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+            kwargs["cwd"] = install_path
     for product in manifest.get("products", []) or []:
         if not isinstance(product, dict):
             continue
@@ -94,6 +108,7 @@ async def run_temp_executable(
             continue
         await run_wine(
             plan, str(exe), _setup_args(manifest, pid, install_path, lang),
+            **kwargs,
         )
 
 
@@ -211,9 +226,15 @@ def _load_script_actions(
     ``asyncio.to_thread`` hop rather than on the event loop.
     """
     base = Path(install_path)
-    scripts = list(base.glob(f"goggame-{game_id}.script")) or list(
-        base.glob("goggame-*.script"),
-    )
+    search_dirs = [base]
+    if (base / "game").is_dir():
+        search_dirs.insert(0, base / "game")
+    scripts: list[Path] = []
+    for d in search_dirs:
+        found = list(d.glob(f"goggame-{game_id}.script")) or list(d.glob("goggame-*.script"))
+        if found:
+            scripts = found
+            break
     parsed: list[tuple[str, list[Any]]] = []
     for script_file in scripts:
         try:

@@ -175,6 +175,9 @@ def _load_play_tasks(info_file: str) -> list[dict[str, Any]]:
     return [t for t in tasks if isinstance(t, dict)]
 
 
+_LAUNCHER_STUB_NAMES = ("launcher.exe", "launch.exe", "autorun.exe")
+
+
 def resolve_fallback_exe(install_path: str) -> str | None:
     """Return the real game exe when the primary playTask is a stub.
 
@@ -183,28 +186,89 @@ def resolve_fallback_exe(install_path: str) -> str | None:
     (launcher.exe, autorun.exe). Returns the first game-category
     ``FileTask`` exe that exists on disk, or None.
     """
-    for info_file in Path(install_path).glob("goggame-*.info"):
-        tasks = _load_play_tasks(str(info_file))
-        primary = next((t for t in tasks if t.get("isPrimary")), None)
-        if not primary:
-            return None
-        cat = str(primary.get("category", "")).lower()
-        fname = Path(str(primary.get("path", ""))).name.lower()
-        if cat not in ("launcher", "tool") and fname not in ("launcher.exe", "launch.exe", "autorun.exe"):
-            return None
-        for t in tasks:
-            if (
-                t != primary
-                and t.get("type") == "FileTask"
-                and t.get("path")
-                and Path(str(t["path"])).name.lower() not in ("launcher.exe", "launch.exe", "autorun.exe")
-                and (t.get("category") == "game" or not cat)
-            ):
-                candidate = Path(install_path) / str(t["path"]).replace("\\", "/")
-                if candidate.is_file():
-                    return str(candidate)
-        return None
+    from unifideck.stores.gog.exe_resolver import resolve_case_insensitive
+
+    base_path = Path(install_path)
+    search_dirs = [base_path]
+    if (base_path / "game").is_dir():
+        search_dirs.insert(0, base_path / "game")
+
+    found_stub = False
+    for directory in search_dirs:
+        for info_file in directory.glob("goggame-*.info"):
+            tasks = _load_play_tasks(str(info_file))
+            primary = next((t for t in tasks if t.get("isPrimary")), None)
+            if not primary:
+                continue
+            cat = str(primary.get("category", "")).lower()
+            fname = Path(str(primary.get("path", ""))).name.lower()
+            if cat not in ("launcher", "tool") and fname not in _LAUNCHER_STUB_NAMES:
+                continue
+
+            found_stub = True
+            for t in tasks:
+                if (
+                    t != primary
+                    and t.get("type") == "FileTask"
+                    and t.get("path")
+                    and Path(str(t["path"])).name.lower() not in _LAUNCHER_STUB_NAMES
+                    and str(t.get("category", "")).lower() == "game"
+                ):
+                    candidate = Path(resolve_case_insensitive(directory, str(t["path"])))
+                    if candidate.is_file():
+                        return str(candidate)
+
+            for t in tasks:
+                if (
+                    t != primary
+                    and t.get("type") == "FileTask"
+                    and t.get("path")
+                    and Path(str(t["path"])).name.lower() not in _LAUNCHER_STUB_NAMES
+                    and str(t.get("category", "")).lower() not in ("launcher", "tool", "document")
+                ):
+                    candidate = Path(resolve_case_insensitive(directory, str(t["path"])))
+                    if candidate.is_file():
+                        return str(candidate)
+
+    if found_stub:
+        try:
+            from unifideck.core.exe_finder import exe_finder
+            found = exe_finder.find(install_path)
+            if found and Path(found).name.lower() not in _LAUNCHER_STUB_NAMES:
+                return str(found)
+        except Exception:
+            pass
+
     return None
+
+
+def is_launcher_stub_target(work_dir: Path, exe_path: Path) -> bool:
+    """Return True if exe_path is a known launcher stub executable."""
+    if exe_path.name.lower() in _LAUNCHER_STUB_NAMES:
+        return True
+    from unifideck.stores.gog.exe_resolver import resolve_case_insensitive
+
+    search_dirs = [work_dir]
+    if (work_dir / "game").is_dir():
+        search_dirs.insert(0, work_dir / "game")
+
+    for directory in search_dirs:
+        for info_file in directory.glob("goggame-*.info"):
+            tasks = _load_play_tasks(str(info_file))
+            primary = next((t for t in tasks if t.get("isPrimary")), None)
+            if not primary:
+                continue
+            cat = str(primary.get("category", "")).lower()
+            fname = Path(str(primary.get("path", ""))).name.lower()
+            if cat in ("launcher", "tool") or fname in _LAUNCHER_STUB_NAMES:
+                primary_path = primary.get("path")
+                if primary_path:
+                    resolved = Path(
+                        resolve_case_insensitive(directory, str(primary_path)),
+                    ).resolve()
+                    if resolved == exe_path.resolve():
+                        return True
+    return False
 
 
 def _read_required_launch_args(work_dir: Path, exe_path: Path) -> list[str]:
@@ -411,7 +475,8 @@ async def _run_gog_with_fallback(
         # a second ``time.monotonic()`` pair here, so the fallback could
         # be gated on a different answer than ``finish_launch`` gave.
         elapsed = run.last_ran_for
-        if rc != 0 and elapsed < EARLY_EXIT_SECONDS:
+        target_is_stub = is_launcher_stub_target(work_dir, target_exe)
+        if (rc != 0 or target_is_stub) and elapsed < EARLY_EXIT_SECONDS:
             fallback = resolve_fallback_exe(str(work_dir))
             if fallback and fallback != str(target_exe):
                 logger.info(

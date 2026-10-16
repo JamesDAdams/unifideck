@@ -147,7 +147,6 @@ class GOGExeResolver:
                 is_launcher_stub = True
 
         if is_launcher_stub and primary is not None:
-            primary_cat = primary.get("category")
             primary_path = primary.get("path")
             game_task = next(
                 (
@@ -157,13 +156,23 @@ class GOGExeResolver:
                     and t.get("type") == "FileTask"
                     and t.get("path")
                     and Path(str(t.get("path"))).name.lower() not in ("launcher.exe", "launch.exe", "autorun.exe")
-                    and (
-                        str(t.get("category", "")).lower() == "game"
-                        or not primary_cat
-                    )
+                    and str(t.get("category", "")).lower() == "game"
                 ),
                 None,
             )
+            if not game_task:
+                game_task = next(
+                    (
+                        t for t in play_tasks
+                        if isinstance(t, dict)
+                        and t != primary
+                        and t.get("type") == "FileTask"
+                        and t.get("path")
+                        and Path(str(t.get("path"))).name.lower() not in ("launcher.exe", "launch.exe", "autorun.exe")
+                        and str(t.get("category", "")).lower() not in ("launcher", "tool", "document")
+                    ),
+                    None,
+                )
             if game_task:
                 logger.info(
                     "[GOGExeResolver] primary task is launcher stub (%s), preferring game task: %s",
