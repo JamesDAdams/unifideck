@@ -252,6 +252,45 @@ def is_proton_install_complete(proton_script: Path) -> bool:
     return True
 
 
+def is_x86_proton(proton_script: Path) -> bool:
+    """True iff ``proton_script`` is an x86/x86_64 Proton build.
+
+    On ARM64 hosts, x86_64 Proton builds (such as official GE-Proton releases)
+    cannot be driven reliably via umu / pressure-vessel: Wine aborts on
+    unimplemented APIs under FEX, pressure-vessel fails on host Vulkan implicit
+    layers, and prefix setup dies with rc=53.
+
+    Native ARM64 Protons (e.g. Proton 11.0 (ARM64), proton-cachyos-11.0-arm64)
+    ship their Wine loader under ``files/bin-arm64/wine``, or have an ARM64
+    ELF binary under ``files/bin/wine`` / ``files/bin/wine64``.
+    """
+    try:
+        root = proton_script.parent if proton_script.is_file() else proton_script
+        files_dir = root / "files"
+        if (files_dir / "bin-arm64" / "wine").is_file():
+            return False
+        from unifideck.core.arch import get_elf_machine
+        for cand in (
+            files_dir / "bin" / "wine64",
+            files_dir / "bin" / "wine",
+            root / "bin" / "wine64",
+            root / "bin" / "wine",
+        ):
+            if cand.is_file():
+                machine = get_elf_machine(cand)
+                if machine == 0x3E:  # EM_X86_64
+                    return True
+                if machine == 0xB7:  # EM_AARCH64
+                    return False
+        tool_name = root.name.lower()
+        if "x86_64" in tool_name or "ge-proton" in tool_name:
+            if not (files_dir / "bin-arm64").is_dir():
+                return True
+    except OSError:
+        pass
+    return False
+
+
 def _select_tarball(
     assets: list[dict[str, Any]],
     tag: str | None = None,
@@ -277,6 +316,7 @@ def _select_tarball(
         for name, url in urls.items():
             if name.endswith(("-aarch64.tar.gz", "-arm64.tar.gz")):
                 return url
+        return None
 
     if tag:
         for expected in (f"{tag}-x86_64.tar.gz", f"{tag}.tar.gz"):

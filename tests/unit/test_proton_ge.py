@@ -603,7 +603,10 @@ def test_ensure_latest_ge_rechecks_under_lock_and_skips_download(
     monkeypatch.setattr(
         ge_installer, "_fetch_latest_release", lambda timeout: {
             "tag_name": tag,
-            "assets": [{"name": f"{tag}.tar.gz", "browser_download_url": "u"}],
+            "assets": [
+                {"name": f"{tag}.tar.gz", "browser_download_url": "u"},
+                {"name": f"{tag}-aarch64.tar.gz", "browser_download_url": "u"},
+            ],
         },
     )
     # First (pre-lock) probe says "absent"; the probe under the lock finds the
@@ -632,7 +635,10 @@ def test_ensure_latest_ge_downloads_when_recheck_finds_incomplete(
     monkeypatch.setattr(
         ge_installer, "_fetch_latest_release", lambda timeout: {
             "tag_name": tag,
-            "assets": [{"name": f"{tag}.tar.gz", "browser_download_url": "u"}],
+            "assets": [
+                {"name": f"{tag}.tar.gz", "browser_download_url": "u"},
+                {"name": f"{tag}-aarch64.tar.gz", "browser_download_url": "u"},
+            ],
         },
     )
     calls = iter([None, half])

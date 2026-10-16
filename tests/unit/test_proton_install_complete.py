@@ -318,3 +318,41 @@ def test_resolve_logged_none_when_tool_unresolved(monkeypatch):
     monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: None)
     tried: list[str] = []
     assert selector._resolve_logged("saved", "nope", tried) is None
+
+
+def test_is_x86_proton_identifies_architectures(tmp_path):
+    # Native ARM64 layout with bin-arm64
+    arm_proton = _make_proton(tmp_path / "Proton 11.0 (ARM64)", files=True, wine=False, wine_bin_arm64=True)
+    assert ge_installer.is_x86_proton(arm_proton) is False
+
+    # x86_64 Proton with ELF header in wine64
+    x86_proton = _make_proton(tmp_path / "GE-Proton11-9", files=True, wine=False, wine64=True)
+    wine64 = x86_proton.parent / "files" / "bin" / "wine64"
+    wine64.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\x3e\x00")
+    assert ge_installer.is_x86_proton(x86_proton) is True
+
+    # ARM64 Proton with ELF header in wine64
+    arm_wine64_proton = _make_proton(tmp_path / "Proton-Custom-ARM", files=True, wine=False, wine64=True)
+    wine64_arm = arm_wine64_proton.parent / "files" / "bin" / "wine64"
+    wine64_arm.write_bytes(b"\x7fELF" + b"\x00" * 14 + b"\xb7\x00")
+    assert ge_installer.is_x86_proton(arm_wine64_proton) is False
+
+
+def test_resolve_logged_rejects_x86_proton_on_arm64(tmp_path, monkeypatch):
+    ge = _make_proton(tmp_path / "GE-Proton11-9", wine64=True)
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: ge)
+    monkeypatch.setattr(selector, "is_arm", lambda: True)
+    monkeypatch.setattr(ge_installer, "is_x86_proton", lambda path: True)
+
+    tried: list[str] = []
+    assert selector._resolve_logged("steam", "GE-Proton11-9", tried) is None
+
+
+def test_resolve_logged_accepts_x86_proton_on_x86_64(tmp_path, monkeypatch):
+    ge = _make_proton(tmp_path / "GE-Proton11-9", wine64=True)
+    monkeypatch.setattr(selector, "resolve_proton_path", lambda tool: ge)
+    monkeypatch.setattr(selector, "is_arm", lambda: False)
+    monkeypatch.setattr(ge_installer, "is_x86_proton", lambda path: True)
+
+    tried: list[str] = []
+    assert selector._resolve_logged("steam", "GE-Proton11-9", tried) == ge

@@ -56,6 +56,14 @@ def test_select_tarball_picks_aarch64_asset_on_arm():
     assert ge_installer._select_tarball(_ASSETS_NEW, "GE-Proton11-5", arch="aarch64") == "http://x/arm.tar.gz"
 
 
+def test_select_tarball_returns_none_on_arm_when_only_x86():
+    """On ARM hosts, if only x86_64 assets exist, return None instead of downloading x86."""
+    assets = [
+        {"name": "GE-Proton11-9-x86_64.tar.gz", "browser_download_url": "http://x/x86.tar.gz"},
+    ]
+    assert ge_installer._select_tarball(assets, "GE-Proton11-9", arch="aarch64") is None
+
+
 def test_select_tarball_still_picks_legacy_bare_tag_asset():
     """GE-Proton11-3 and earlier shipped x86_64 as a bare ``<tag>.tar.gz``."""
     assets = [

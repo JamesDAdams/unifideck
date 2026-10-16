@@ -4,6 +4,7 @@ import logging
 import subprocess
 from pathlib import Path
 
+from unifideck.core import arch
 from unifideck.core.compat_bridge import to_unsigned
 from unifideck.launcher.types.errors import (
     DependencyMissingError,
@@ -14,6 +15,11 @@ from unifideck.utils import vdf_compat
 from . import external_ge, ge_installer, ge_marker, proton_config
 
 logger = logging.getLogger(__name__)
+
+
+def is_arm() -> bool:
+    """Return True if running on an ARM CPU architecture."""
+    return arch.is_arm()
 # Interpreters tried (in order) to run the umu zipapp. umu needs Python
 # >=3.10 and uses its OWN bundled deps, so it does NOT depend on our vendored
 # ``_cffi_backend`` — unlike the launcher process itself, which Steam starts
@@ -380,8 +386,14 @@ def _resolve_logged(source: str, tool: str, tried: list[str]) -> Path | None:
             source, tool, path.parent,
         )
         return None
+    if is_arm() and ge_installer.is_x86_proton(path):
+        logger.warning(
+            "[launcher.proton] %s tool %s (%s) is an x86_64 build, "
+            "incompatible with ARM64 host — skipping, will fall back",
+            source, tool, path.parent,
+        )
+        return None
     # On ARM64 hosts, if direct Valve runner or umu can drive it, accept Valve Proton.
-    from unifideck.core.arch import is_arm
     if _is_valve_proton_name(tool) and not is_arm() and not _can_umu_drive(path):
         logger.warning(
             "[launcher.proton] %s tool %s (%s) has no protonfixes/ — umu "
@@ -493,8 +505,6 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     4. Fallback — Proton Experimental (the only fallback by design;
        older local GE versions stay user-selectable via Force Compat).
     """
-    from unifideck.core.arch import is_arm
-
     # On ARM64 hosts (Snapdragon / SteamOS ARM64), GE-Proton builds are x86_64
     # only and cannot run 32-bit DirectX titles (missing 32-bit Vulkan thunking).
     # Prefer an installed, complete native Proton Experimental build by default —
@@ -514,7 +524,7 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
         # the direct SLR runner in core.py handles execution via _v2-entry-point.
         for cand_id in ("proton_11", "proton_experimental"):
             cand = resolve_proton_path(cand_id)
-            if cand and ge_installer.is_proton_install_complete(cand):
+            if cand and ge_installer.is_proton_install_complete(cand) and not ge_installer.is_x86_proton(cand):
                 tried.append(f"arm64-default:{cand_id}")
                 logger.info(
                     "[launcher.proton] ARM64 host: defaulting to native "
@@ -529,18 +539,24 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
 
     choice = external_ge.choose_ge(external, cached, cached_path)
     if choice is not None:
-        if choice.is_external:
-            tried.append(f"external-ge:{choice.tool_id}")
+        if is_arm() and ge_installer.is_x86_proton(choice.path):
             logger.info(
-                "[launcher.proton] selected externally managed GE-Proton: %s (%s)",
-                choice.tool_id, choice.version or "unknown",
+                "[launcher.proton] ARM64 host: skipping x86_64 GE-Proton (%s)",
+                choice.tool_id,
             )
         else:
-            tried.append(f"latest-ge-cached:{choice.tool_id}")
-            logger.info(
-                "[launcher.proton] selected cached latest GE-Proton: %s", choice.tool_id,
-            )
-        return choice.path, choice.tool_id
+            if choice.is_external:
+                tried.append(f"external-ge:{choice.tool_id}")
+                logger.info(
+                    "[launcher.proton] selected externally managed GE-Proton: %s (%s)",
+                    choice.tool_id, choice.version or "unknown",
+                )
+            else:
+                tried.append(f"latest-ge-cached:{choice.tool_id}")
+                logger.info(
+                    "[launcher.proton] selected cached latest GE-Proton: %s", choice.tool_id,
+                )
+            return choice.path, choice.tool_id
 
     # On-demand download at launch time — the background installer
     # hasn't finished (or never ran). This is otherwise silent, leaving
@@ -552,11 +568,17 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     result = ge_installer.ensure_latest_ge(progress_cb=announcer)
     if result:
         path, tag = result
-        tried.append(f"latest-ge:{tag}")
-        logger.info("[launcher.proton] selected latest GE-Proton: %s", tag)
-        if announcer.fired:  # only when a download actually happened
-            _announce_ge_ready(tag)
-        return path, tag
+        if is_arm() and ge_installer.is_x86_proton(path):
+            logger.info(
+                "[launcher.proton] ARM64 host: skipping x86_64 GE-Proton (%s)",
+                tag,
+            )
+        else:
+            tried.append(f"latest-ge:{tag}")
+            logger.info("[launcher.proton] selected latest GE-Proton: %s", tag)
+            if announcer.fired:  # only when a download actually happened
+                _announce_ge_ready(tag)
+            return path, tag
 
     tried.append("fallback:proton_experimental")
     experimental = resolve_proton_path("proton_experimental")

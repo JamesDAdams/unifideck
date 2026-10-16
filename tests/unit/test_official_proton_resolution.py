@@ -133,6 +133,7 @@ def _stub_tiers(
 ):
     """Stub the two top tiers; only ``installed`` tools resolve."""
     common = _library(tmp_path, *installed) if installed else tmp_path / "empty"
+    monkeypatch.setattr(S, "is_arm", lambda: False)
     monkeypatch.setattr(S, "get_steam_compat_tool_override", lambda _a: live)
     monkeypatch.setattr(S, "get_saved_proton_tool", lambda _g: shadow)
     monkeypatch.setattr(S, "get_unifideck_proton_tool", lambda: None)
