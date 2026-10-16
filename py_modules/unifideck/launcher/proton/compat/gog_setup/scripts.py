@@ -41,53 +41,67 @@ def _win_path(install_path: str) -> str:
 
 def _setup_args(
     manifest: dict[str, Any], product_id: str, install_path: str, lang: str,
+    *, is_temp_exe: bool = False,
 ) -> list[str]:
     """Build the GOG silent-setup arg list (Heroic setup.ts)."""
     name = language_name(lang)
     win_install = _win_path(install_path)
     game_id = str(manifest.get("gameId") or manifest.get("game_id") or product_id)
-    win_support = _win_path(str(SUPPORT_DIR / game_id))
-    return [
+    args = [
         "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES",
         f"/DIR={win_install}",
         f"/Language={name}", f"/LANG={name}",
         f"/ProductId={product_id}", "/galaxyclient",
         f"/buildId={manifest.get('buildId', '0')}",
         f"/versionName={manifest.get('version_name', '1.0')}",
-        f"/lang-code={lang}", f"/supportDir={win_support}",
-        "/nodesktopshorctut", "/nodesktopshortcut",  # GOG's own typo + correct
+        f"/lang-code={lang}",
     ]
+    if not is_temp_exe:
+        support_dir = SUPPORT_DIR / game_id
+        support_dir.mkdir(parents=True, exist_ok=True)
+        win_support = _win_path(str(support_dir))
+        args.append(f"/supportDir={win_support}")
+    args.extend(["/nodesktopshorctut", "/nodesktopshortcut"])
+    return args
 
 
 async def run_script_interpreter(
     plan: ProtonLaunchPlan, game_id: str,
     manifest: dict[str, Any], install_path: str, lang: str,
-) -> None:
+) -> bool:
     """Run ``scriptinterpreter.exe`` (ISI) for v2 manifests."""
     isi = REDIST_DIR / "__redist" / "ISI" / "scriptinterpreter.exe"
     if not isi.is_file():
         logger.warning("[gog_setup] scriptinterpreter.exe missing")
-        return
+        return False
     kwargs: dict[str, Any] = {}
     if install_path:
         import inspect
         sig = inspect.signature(run_wine)
         if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             kwargs["cwd"] = install_path
-    for product in manifest.get("products", []) or []:
-        pid = product.get("productId") if isinstance(product, dict) else None
+    success = True
+    products = [p for p in (manifest.get("products", []) or []) if isinstance(p, dict) and p.get("productId")]
+    for product in products:
+        pid = product.get("productId")
         if not pid:
             continue
-        await run_wine(
-            plan, str(isi), _setup_args(manifest, pid, install_path, lang),
+        pid_str = str(pid)
+        if len(products) > 1 and pid_str != str(game_id) and not any(Path(install_path).glob(f"goggame-{pid_str}.*")):
+            continue
+        ok = await run_wine(
+            plan, str(isi), _setup_args(manifest, pid_str, install_path, lang),
             **kwargs,
         )
+        if not ok:
+            success = False
+    return success
 
 
 async def run_temp_executable(
     plan: ProtonLaunchPlan, game_id: str,
     manifest: dict[str, Any], install_path: str, lang: str,
-) -> None:
+) -> bool:
     """Run a per-product ``temp_executable`` setup (e.g. The Witcher)."""
     kwargs: dict[str, Any] = {}
     if install_path:
@@ -95,21 +109,28 @@ async def run_temp_executable(
         sig = inspect.signature(run_wine)
         if "cwd" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
             kwargs["cwd"] = install_path
-    for product in manifest.get("products", []) or []:
-        if not isinstance(product, dict):
-            continue
+    success = True
+    ran_any = False
+    products = [p for p in (manifest.get("products", []) or []) if isinstance(p, dict) and p.get("temp_executable")]
+    for product in products:
         temp_exe = product.get("temp_executable") or ""
         if not temp_exe:
             continue
-        pid = product.get("productId", game_id)
+        pid = str(product.get("productId", game_id))
+        if len(products) > 1 and pid != str(game_id) and not any(Path(install_path).glob(f"goggame-{pid}.*")):
+            continue
         exe = SUPPORT_DIR / game_id / pid / temp_exe
         if not exe.is_file():
             logger.warning("[gog_setup] temp_executable missing: %s", exe)
             continue
-        await run_wine(
-            plan, str(exe), _setup_args(manifest, pid, install_path, lang),
+        ran_any = True
+        ok = await run_wine(
+            plan, str(exe), _setup_args(manifest, pid, install_path, lang, is_temp_exe=True),
             **kwargs,
         )
+        if not ok:
+            success = False
+    return success if ran_any else True
 
 
 def _wow64_subkeys(root: str, subkey: str) -> list[str]:

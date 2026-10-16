@@ -90,7 +90,9 @@ class ProtonLaunchPlan:
         """Build command argv using direct SLR runner or standard umu wrapper."""
         argv: list[str] = []
         if self.runner_prefix_argv:
-            argv.extend(self.runner_prefix_argv)
+            verb = self.env.get("PROTON_VERB", "waitforexitandrun")
+            prefix = [a if a != "waitforexitandrun" else verb for a in self.runner_prefix_argv]
+            argv.extend(prefix)
             argv.append(str(target_exe))
             argv.extend(extra_args)
         else:

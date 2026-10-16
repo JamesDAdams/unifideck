@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 # wrote this marker anyway — latching the failure for the life of the prefix.
 # Every affected prefix retries its redistributables exactly once on the next
 # launch. Bump again if the redist step's contract changes.
-_MARKER_NAME = ".unifideck-gog-setup-done.v2"
+_MARKER_NAME = ".unifideck-gog-setup-done.v3"
 # Versioned marker for the script-registry step alone. Bumped to ``.v2`` when
 # the dual-WOW64-view write landed; existing prefixes (whose only marker is the
 # heavy ``_MARKER_NAME``) re-apply their registry script once so 32-bit GOG
@@ -126,21 +126,7 @@ async def _run_setup_scripts(
     install_path: str,
     language: str,
 ) -> None:
-    """Run the v2 scriptInterpreter / temp-executable setup step, if any.
-
-    Wrapped so a failure here cannot take the launch down with it. The
-    module's contract is "failures log and never block the launch" — true
-    of every *reported* failure (``run_wine`` returns False and the caller
-    carries on) but not of an *exception*. ``scriptinterpreter.exe`` is a
-    third-party Windows binary handed a path that may contain spaces; an
-    OSError or Wine-level crash escaping here propagated straight out of
-    ``apply_gog_setup`` and aborted the launch before the game exe was ever
-    spawned.
-
-    The timing half of the same failure is bounded by
-    :data:`common.SETUP_TIMEOUT_S`: field bundle 2026-10-03 showed this same
-    helper sitting for 35 minutes before it returned at all.
-    """
+    """Run the v2 scriptInterpreter / temp-executable setup step, if any."""
     if manifest.get("version") != 2:
         return
     try:
