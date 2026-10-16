@@ -336,6 +336,7 @@ def _apply_per_title_env(
     from unifideck.launcher.proton.fixes.game_fixes import needs_native_icu
     if rockstar_egs:
         _apply_rockstar_dll_overrides(env, umu_id)
+        env["SteamDeck"] = "1"
     if ctx.store == "battlenet":
         _apply_battlenet_env(env)
     # Store-independent: keyed off the exe/id, not ctx.store, because the

@@ -90,6 +90,7 @@ def test_rockstar_rdr2_gets_egs_with_umu_id_none(tmp_path, monkeypatch):
     plan = _prepare(tmp_path, monkeypatch, "epic", umu_id=None, game_id="Heather")
     assert plan.env["STORE"] == "egs"
     assert plan.env["WINEDLLOVERRIDES"] == "vulkan-1=n,b"
+    assert plan.env["SteamDeck"] == "1"
 
 
 def test_rockstar_gta5_gets_egs_by_app_name(tmp_path, monkeypatch):

@@ -63,7 +63,7 @@ LAUNCH_SHIM_NAME = "unifideck-rockstar-launch.bat"
 # title and silently does nothing), and ``%*`` forwards any game args
 # legendary appends. Single LF endings, matching the file that was verified
 # working on-device.
-_LAUNCH_SHIM_TEMPLATE = 'start "" {launcher} {play_exe} %*\n'
+_LAUNCH_SHIM_TEMPLATE = 'start "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\n'
 # Wine .reg block that registers the com.epicgames.launcher URL protocol
 # so the Rockstar launcher's Epic handoff resolves. Mirrors Heroic's
 # ``reg add HKEY_CLASSES_ROOT\com.epicgames.launcher /f``.

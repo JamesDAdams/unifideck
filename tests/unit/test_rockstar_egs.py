@@ -301,7 +301,7 @@ def test_setup_writes_launch_shim_matching_proven_fix(tmp_path):
 
     shim = install / rockstar_egs.LAUNCH_SHIM_NAME
     assert shim.is_file()
-    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayGTAV.exe %*\n'
+    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayGTAV.exe -nobattleye -onSteamDeck %*\n'
 
 
 def test_setup_shim_names_rdr2_play_exe(tmp_path):
@@ -317,7 +317,7 @@ def test_setup_shim_names_rdr2_play_exe(tmp_path):
     )
 
     shim = install / rockstar_egs.LAUNCH_SHIM_NAME
-    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe %*\n'
+    assert shim.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe -nobattleye -onSteamDeck %*\n'
 
 
 def test_setup_shim_rewritten_when_stale(tmp_path):
@@ -334,7 +334,7 @@ def test_setup_shim_rewritten_when_stale(tmp_path):
         _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin),
     )
 
-    assert stale.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe %*\n'
+    assert stale.read_text() == 'start "" EpicGamesLauncher.exe PlayRDR2.exe -nobattleye -onSteamDeck %*\n'
 
 
 def test_setup_does_not_touch_user_hand_written_fix_bat(tmp_path):
