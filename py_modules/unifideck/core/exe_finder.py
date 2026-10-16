@@ -55,6 +55,9 @@ WRAPPER_EXES = {
     "patcher.exe",
     "launcher.exe",
     "unrealcefsubprocess.exe",
+    "uplaylaunch.exe",
+    "uplaylauncher.exe",
+    "uplay.exe",
 }
 
 #: Vendor download-staging directories. Nothing launchable ever lives in one:

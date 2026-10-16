@@ -215,6 +215,22 @@ async def _resolve_game_exe(
                 exe = fallback
         except Exception:
             logger.debug("[launcher.dispatcher] fallback exe resolve failed for %s", game_key, exc_info=True)
+    if (
+        store == "epic"
+        and work_dir
+    ):
+        try:
+            from unifideck.core.exe_finder import WRAPPER_EXES, exe_finder
+            if Path(exe).name.lower() in WRAPPER_EXES:
+                fallback = exe_finder.find(work_dir)
+                if fallback and fallback != exe:
+                    logger.info(
+                        "[launcher.dispatcher] bypassing wrapper stub in games.map for %s: %s → %s",
+                        game_key, exe, fallback,
+                    )
+                    exe = fallback
+        except Exception:
+            logger.debug("[launcher.dispatcher] epic wrapper bypass failed for %s", game_key, exc_info=True)
     return exe, work_dir, has_entry, app_id
 
 

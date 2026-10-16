@@ -64,8 +64,6 @@ def _resolve_exe_override(plan: ProtonLaunchPlan) -> Path | None:
     # User "Change executable" / curated MANUAL_FIXES wins; otherwise the
     # Rockstar Play exe for RDR2/GTA5 (None for every other Epic game).
     rel = get_exe_override(plan.context.game_id) or _rockstar_play_exe_rel(plan)
-    if not rel:
-        return None
     installed = Path(
         "~/.config/legendary/installed.json",
     ).expanduser()
@@ -81,8 +79,26 @@ def _resolve_exe_override(plan: ProtonLaunchPlan) -> Path | None:
     )
     if not install_path:
         return None
-    full = Path(install_path) / rel
-    return full if full.is_file() else None
+    if rel:
+        full = Path(install_path) / rel
+        return full if full.is_file() else None
+
+    # If the executable configured in installed.json is a known wrapper stub
+    # (e.g. UplayLaunch.exe), bypass it to the real game executable via ExeFinder.
+    configured_exe = (
+        data.get(plan.context.game_id, {}).get("executable") or ""
+    )
+    from unifideck.core.exe_finder import WRAPPER_EXES, exe_finder
+    if Path(configured_exe).name.lower() in WRAPPER_EXES:
+        found = exe_finder.find(install_path)
+        if found:
+            logger.info(
+                "[launcher.proton.epic] bypassing wrapper %s -> real game exe %s",
+                configured_exe, found,
+            )
+            return Path(found)
+
+    return None
 
 async def _run_epic_prerequisites(plan: ProtonLaunchPlan) -> None:
     """Run epic prerequisites."""

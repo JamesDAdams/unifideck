@@ -93,13 +93,14 @@ class EpicExeResolver:
             manifest = info.get("manifest") or {}
             launch_exe = manifest.get("launch_exe")
             if isinstance(launch_exe, str) and launch_exe:
+                from unifideck.core.exe_finder import WRAPPER_EXES
                 cleaned = launch_exe.lstrip("/")
                 candidate = str(Path(install_path) / cleaned)
-                if Path(candidate).is_file():
+                if Path(cleaned).name.lower() not in WRAPPER_EXES and Path(candidate).is_file():
                     return candidate
                 logger.warning(
                     "[epic_exe_resolver] manifest launch_exe "
-                    "missing on disk: %s → fallback to ExeFinder",
-                    candidate,
+                    "%s is wrapper stub or missing on disk → fallback to ExeFinder",
+                    cleaned,
                 )
         return self._find_exe(install_path, [game_id])
