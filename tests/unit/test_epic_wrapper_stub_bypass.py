@@ -97,3 +97,18 @@ async def test_dispatcher_bypasses_wrapper_stub_for_epic(tmp_path):
         _StubSvc(), "epic", "Jasper", "epic:Jasper",
     )
     assert exe == str(real_exe)
+
+
+def test_exe_finder_skips_uplay_installer_directory_and_binary(tmp_path):
+    uplay_dir = tmp_path / "Uplay"
+    uplay_dir.mkdir()
+    (uplay_dir / "UplayInstaller.exe").write_bytes(b"biginstaller" * 1024 * 1024)
+    (tmp_path / "installer.exe").write_bytes(b"installer" * 1024 * 1024)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    real_exe = bin_dir / "Watch_Dogs.exe"
+    real_exe.write_bytes(b"game" * 1024)
+
+    found = exe_finder.find(str(tmp_path), ["watch_dogs.exe"])
+    assert found == str(real_exe)
+

@@ -103,4 +103,15 @@ class EpicExeResolver:
                     "%s is wrapper stub or missing on disk → fallback to ExeFinder",
                     cleaned,
                 )
-        return self._find_exe(install_path, [game_id])
+        hints = [game_id]
+        if info is not None:
+            title = self._extract_title(info, game_id)
+            if title and title != game_id:
+                hints.append(title)
+                # Also add slugified variants (e.g. "Watch Dogs" -> "Watch_Dogs.exe", "WatchDogs.exe")
+                hints.append(f"{title}.exe")
+                hints.append(f"{title.replace(' ', '_')}.exe")
+                hints.append(f"{title.replace(' ', '')}.exe")
+                hints.append(title.replace(' ', '_'))
+                hints.append(title.replace(' ', ''))
+        return self._find_exe(install_path, hints)

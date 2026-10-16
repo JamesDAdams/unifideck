@@ -60,16 +60,38 @@ WRAPPER_EXES = {
     "uplay.exe",
 }
 
-#: Vendor download-staging directories. Nothing launchable ever lives in one:
-#: the client empties it as the last step of an install, so a binary picked
-#: from inside is a path that stops existing the moment the game is playable.
-#:
-#: ``uplay_download`` is Ubisoft Connect's. It is named again in
-#: ``stores/ubisoft/library/detection_helpers.UPC_STAGING_DIR``, where the
-#: same directory carries a second meaning (its emptiness is UPC's completion
-#: signal). The two are deliberately not shared: ``core`` sits below
-#: ``stores`` and must not import from it.
-STAGING_DIRS = frozenset({"uplay_download"})
+#: Vendor download-staging directories and tool subdirectories.
+#: Nothing launchable ever lives in these.
+STAGING_DIRS = frozenset({
+    "uplay_download",
+    "uplay",
+    "redist",
+    "__redist",
+    "_commonredist",
+    "commonredist",
+    "support",
+    "installer",
+    "installers",
+    "install",
+    "directx",
+    "dependencies",
+    "prerequisites",
+})
+
+_SKIP_EXE_SUBSTRINGS = (
+    "unins",
+    "setup",
+    "install",
+    "crash",
+    "redist",
+    "vcredist",
+    "vc_redist",
+    "dxsetup",
+    "physx",
+    "dotnet",
+    "directx",
+    "uplay",
+)
 
 class ExeFinder:
     """Score-based .exe picker for game install directories."""
@@ -140,7 +162,7 @@ class ExeFinder:
         for root, dirs, files in os.walk(install_path):
             rel = os.path.relpath(root, install_path)
             depth = 0 if rel == "." else rel.count(os.sep) + 1
-            dirs[:] = [d for d in dirs if d not in STAGING_DIRS]
+            dirs[:] = [d for d in dirs if d.lower() not in STAGING_DIRS]
             if depth > 3:
                 dirs.clear()
                 continue
@@ -149,6 +171,8 @@ class ExeFinder:
                 if not lower.endswith(".exe"):
                     continue
                 if lower in WRAPPER_EXES:
+                    continue
+                if any(sub in lower for sub in _SKIP_EXE_SUBSTRINGS):
                     continue
                 yield str(Path(root) / filename), depth, filename
 
