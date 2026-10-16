@@ -107,9 +107,39 @@ def apply_rockstar_egs_setup(plan: ProtonLaunchPlan) -> None:
     except Exception:
         logger.exception("[rockstar_egs] launch-shim write failed")
     try:
+        _write_commandline_txt(plan)
+    except Exception:
+        logger.exception("[rockstar_egs] commandline.txt write failed")
+    try:
         _register_epic_protocol(plan)
     except Exception:
         logger.exception("[rockstar_egs] protocol registration failed")
+
+
+def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:
+    install_dir = _resolve_install_dir(plan)
+    if install_dir is None:
+        return
+    cmd_file = install_dir / "commandline.txt"
+    needed_args = ["-nobattleye", "-onSteamDeck"]
+    existing = ""
+    if cmd_file.is_file():
+        try:
+            existing = cmd_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            existing = ""
+    lines = [line.strip() for line in existing.splitlines() if line.strip()]
+    modified = False
+    for arg in needed_args:
+        if not any(arg.lower() == line.lower() for line in lines):
+            lines.append(arg)
+            modified = True
+    if modified or not cmd_file.is_file():
+        try:
+            cmd_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            logger.info("[rockstar_egs] updated %s with %s", cmd_file, needed_args)
+        except OSError:
+            logger.warning("[rockstar_egs] failed to write %s", cmd_file, exc_info=True)
 
 
 def _resolve_install_dir(plan: ProtonLaunchPlan) -> Path | None:

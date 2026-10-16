@@ -249,6 +249,23 @@ def test_setup_copies_fake_launcher_for_rockstar(tmp_path):
     assert dest.read_bytes() == b"MZ-fake"
 
 
+def test_setup_writes_commandline_txt_with_nobattleye(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    plan = _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    cmd_file = install / "commandline.txt"
+    assert cmd_file.is_file()
+    content = cmd_file.read_text(encoding="utf-8")
+    assert "-nobattleye" in content
+    assert "-onSteamDeck" in content
+
+
 def test_setup_registers_protocol_when_user_reg_present(tmp_path):
     install = tmp_path / "install"
     install.mkdir()
