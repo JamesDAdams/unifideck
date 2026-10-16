@@ -418,3 +418,79 @@ def test_play_exe_rel_prefers_the_shim_when_present(tmp_path):
     plan = _exe_plan("Heather", "PlayRDR2.exe", work_dir=tmp_path)
 
     assert _rockstar_play_exe_rel(plan) == rockstar_egs.LAUNCH_SHIM_NAME
+
+
+def test_setup_copies_fake_launcher_to_prefix_locations(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+
+    plan = _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    win_target = drive_c / "windows" / "command" / "EpicGamesLauncher.exe"
+    assert win_target.is_file()
+    assert win_target.read_bytes() == b"MZ-fake"
+
+    portal_target = (
+        drive_c / "Program Files (x86)" / "Epic Games" / "Launcher"
+        / "Portal" / "Binaries" / "Win32" / "EpicGamesLauncher.exe"
+    )
+    assert portal_target.is_file()
+    assert portal_target.read_bytes() == b"MZ-fake"
+
+
+def test_setup_registers_protocol_command_in_registry(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+    user_reg = prefix / "pfx" / "user.reg"
+    user_reg.write_text("WINE REGISTRY Version 2\n", encoding="utf-8")
+
+    plan = _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    text = user_reg.read_text(encoding="utf-8")
+    assert "[Software\\\\Classes\\\\com.epicgames.launcher]" in text
+    assert "[Software\\\\Classes\\\\com.epicgames.launcher\\\\shell\\\\open\\\\command]" in text
+    assert '@="\\"C:\\\\windows\\\\command\\\\EpicGamesLauncher.exe\\" \\"%1\\""' in text
+
+
+def test_setup_updates_legacy_protocol_registration(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+    user_reg = prefix / "pfx" / "user.reg"
+    legacy_content = (
+        "WINE REGISTRY Version 2\n\n"
+        "[Software\\\\Classes\\\\com.epicgames.launcher]\n"
+        '@="URL:com.epicgames.launcher"\n'
+        '"URL Protocol"=""\n'
+    )
+    user_reg.write_text(legacy_content, encoding="utf-8")
+
+    plan = _setup_plan(tmp_path, "Heather", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    text = user_reg.read_text(encoding="utf-8")
+    assert text.count("[Software\\\\Classes\\\\com.epicgames.launcher]") == 1
+    assert "[Software\\\\Classes\\\\com.epicgames.launcher\\\\shell\\\\open\\\\command]" in text
+

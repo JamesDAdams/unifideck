@@ -44,6 +44,7 @@ from pathlib import Path
 
 from unifideck.launcher.proton.infrastructure.core import ProtonLaunchPlan
 from unifideck.launcher.proton.infrastructure.prefix_layout import (
+    normalize_prefix_root,
     resolve_drive_c,
     resolve_registry_prefix,
 )
@@ -66,12 +67,18 @@ _LAUNCH_SHIM_TEMPLATE = 'start "" {launcher} {play_exe} %*\n'
 # Wine .reg block that registers the com.epicgames.launcher URL protocol
 # so the Rockstar launcher's Epic handoff resolves. Mirrors Heroic's
 # ``reg add HKEY_CLASSES_ROOT\com.epicgames.launcher /f``.
-_EPIC_PROTOCOL_REG = (
+_EPIC_PROTOCOL_BASE = (
     "\n[Software\\\\Classes\\\\com.epicgames.launcher]\n"
     '@="URL:com.epicgames.launcher"\n'
     '"URL Protocol"=""\n'
 )
+_EPIC_PROTOCOL_COMMAND = (
+    "\n[Software\\\\Classes\\\\com.epicgames.launcher\\\\shell\\\\open\\\\command]\n"
+    '@="\\"C:\\\\windows\\\\command\\\\EpicGamesLauncher.exe\\" \\"%1\\""\n'
+)
+_EPIC_PROTOCOL_REG = _EPIC_PROTOCOL_BASE + _EPIC_PROTOCOL_COMMAND
 _EPIC_PROTOCOL_MARKER = "[Software\\\\Classes\\\\com.epicgames.launcher]"
+_EPIC_COMMAND_MARKER = "[Software\\\\Classes\\\\com.epicgames.launcher\\\\shell\\\\open\\\\command]"
 
 
 def apply_rockstar_egs_setup(plan: ProtonLaunchPlan) -> None:
@@ -171,17 +178,42 @@ def _copy_fake_launcher(plan: ProtonLaunchPlan) -> None:
         )
         return
     install_dir = _resolve_install_dir(plan)
-    if install_dir is None:
-        logger.warning(
-            "[rockstar_egs] install dir missing — skipping fake launcher",
-        )
-        return
-    dest = install_dir / _FAKE_LAUNCHER_NAME
-    if dest.is_file():
-        logger.info("[rockstar_egs] fake launcher already present: %s", dest)
-        return
-    shutil.copy2(fake, dest)
-    logger.info("[rockstar_egs] installed fake launcher: %s", dest)
+    if install_dir is not None:
+        dest = install_dir / _FAKE_LAUNCHER_NAME
+        if dest.is_file():
+            logger.info("[rockstar_egs] fake launcher already present: %s", dest)
+        else:
+            shutil.copy2(fake, dest)
+            logger.info("[rockstar_egs] installed fake launcher: %s", dest)
+
+    prefix_root = normalize_prefix_root(plan.prefix_path)
+    drive_c_candidates: list[Path] = []
+    c1 = prefix_root / "drive_c"
+    if c1.is_dir():
+        drive_c_candidates.append(c1)
+    c2 = prefix_root / "pfx" / "drive_c"
+    if c2.is_dir() and c2 not in drive_c_candidates:
+        drive_c_candidates.append(c2)
+    c3 = resolve_drive_c(plan.prefix_path)
+    if c3 is not None and c3 not in drive_c_candidates:
+        drive_c_candidates.append(c3)
+
+    for drive_c in drive_c_candidates:
+        prefix_targets = [
+            drive_c / "windows" / "command" / _FAKE_LAUNCHER_NAME,
+            (
+                drive_c / "Program Files (x86)" / "Epic Games" / "Launcher"
+                / "Portal" / "Binaries" / "Win32" / _FAKE_LAUNCHER_NAME
+            ),
+        ]
+        for target in prefix_targets:
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.is_file():
+                    shutil.copy2(fake, target)
+                    logger.info("[rockstar_egs] installed fake launcher into prefix: %s", target)
+            except OSError as err:
+                logger.warning("[rockstar_egs] failed to copy fake launcher to %s: %s", target, err)
 
 
 def _register_epic_protocol(plan: ProtonLaunchPlan) -> None:
@@ -202,8 +234,13 @@ def _register_epic_protocol(plan: ProtonLaunchPlan) -> None:
         )
         return
     content = user_reg.read_text(encoding="utf-8", errors="replace")
-    if _EPIC_PROTOCOL_MARKER in content:
+    to_append = ""
+    if _EPIC_PROTOCOL_MARKER not in content:
+        to_append += _EPIC_PROTOCOL_BASE
+    if _EPIC_COMMAND_MARKER not in content:
+        to_append += _EPIC_PROTOCOL_COMMAND
+    if not to_append:
         logger.info("[rockstar_egs] epic protocol already registered")
         return
-    user_reg.write_text(content + _EPIC_PROTOCOL_REG, encoding="utf-8")
+    user_reg.write_text(content + to_append, encoding="utf-8")
     logger.info("[rockstar_egs] registered com.epicgames.launcher protocol")

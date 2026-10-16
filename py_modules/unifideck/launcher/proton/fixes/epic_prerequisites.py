@@ -36,6 +36,14 @@ _LEGENDARY_CONFIG_CANDIDATES = (
         "legendaryConfig/legendary",
     ),
 )
+_SKIP_PREREQ_SUBSTRINGS = ("uplay", "uplayinstaller")
+
+
+def _is_skipped_prereq(prereq: dict[str, Any]) -> bool:
+    name = (prereq.get("name") or "").lower()
+    path = (prereq.get("path") or "").lower()
+    return any(s in name or s in path for s in _SKIP_PREREQ_SUBSTRINGS)
+
 
 async def apply_epic_prerequisites(plan: ProtonLaunchPlan) -> bool:
     """Apply EPIC prerequisites.
@@ -61,6 +69,15 @@ async def apply_epic_prerequisites(plan: ProtonLaunchPlan) -> bool:
         _cleanup_legacy_marker(legacy_marker)
         logger.info(
             "[epic_prerequisites] %s: no prereqs defined", game_id,
+        )
+        return True
+    if _is_skipped_prereq(prereq):
+        name = prereq.get("name") or "unknown"
+        _write_marker_sync(new_marker, body=f"skipped: {name}")
+        _cleanup_legacy_marker(legacy_marker)
+        logger.info(
+            "[epic_prerequisites] %s: skipping obsolete prereq %s (%s)",
+            game_id, name, prereq.get("path"),
         )
         return True
     name = prereq.get("name") or "unknown"
@@ -157,6 +174,8 @@ async def _run_prerequisite(
     prefix_root: Path,
 ) -> bool:
     """Run prerequisite."""
+    if _is_skipped_prereq(prereq):
+        return True
     install_path = prereq.get("install_path") or ""
     rel = prereq.get("path") or ""
     if not install_path or not rel:

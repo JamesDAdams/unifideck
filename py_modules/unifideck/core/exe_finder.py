@@ -82,7 +82,10 @@ _SKIP_EXE_SUBSTRINGS = (
     "unins",
     "setup",
     "install",
-    "crash",
+    "crashreport",
+    "crashhandler",
+    "crashpad",
+    "crashreporter",
     "redist",
     "vcredist",
     "vc_redist",
@@ -114,7 +117,14 @@ class ExeFinder:
         """
         if not install_path or not Path(install_path).is_dir():
             return None
-        hint_lower = {h.lower() for h in hints} if hints else set()
+        hint_lower: set[str] = set()
+        if hints:
+            for h in hints:
+                hl = h.lower()
+                hint_lower.add(hl)
+                hint_lower.add(Path(hl).name)
+                hint_lower.add(hl.removesuffix(".exe"))
+                hint_lower.add(Path(hl).name.removesuffix(".exe"))
         candidates = [
             (
                 # Both ``_walk_exe_candidates`` (yield) and
@@ -129,12 +139,16 @@ class ExeFinder:
                 ),
                 path,
             )
-            for path, depth, filename in (self._walk_exe_candidates(install_path))
+            for path, depth, filename in (
+                self._walk_exe_candidates(install_path, hint_lower=hint_lower)
+            )
         ]
         return self._rank_candidates(candidates, install_path)
 
     def _walk_exe_candidates(
-        self, install_path: str,
+        self,
+        install_path: str,
+        hint_lower: set[str] | list[str] | None = None,
     ) -> Iterator[tuple[str, int, str]]:
         """Yield ``(path, depth, filename)`` for every viable .exe under root.
 
@@ -154,11 +168,20 @@ class ExeFinder:
 
         Args:
             install_path: root directory.
+            hint_lower: optional set or list of lowercased hints.
 
         Yields:
             ``(full_path, depth, filename)`` triples for
             each candidate.
         """
+        hints_set: set[str] = set()
+        if hint_lower:
+            for h in hint_lower:
+                hl = h.lower()
+                hints_set.add(hl)
+                hints_set.add(Path(hl).name)
+                hints_set.add(hl.removesuffix(".exe"))
+                hints_set.add(Path(hl).name.removesuffix(".exe"))
         for root, dirs, files in os.walk(install_path):
             rel = os.path.relpath(root, install_path)
             depth = 0 if rel == "." else rel.count(os.sep) + 1
@@ -172,7 +195,11 @@ class ExeFinder:
                     continue
                 if lower in WRAPPER_EXES:
                     continue
-                if any(sub in lower for sub in _SKIP_EXE_SUBSTRINGS):
+                matches_hint = (
+                    lower in hints_set
+                    or lower.removesuffix(".exe") in hints_set
+                )
+                if not matches_hint and any(sub in lower for sub in _SKIP_EXE_SUBSTRINGS):
                     continue
                 yield str(Path(root) / filename), depth, filename
 
@@ -209,7 +236,8 @@ class ExeFinder:
             Integer score (higher is better).
         """
         score = 0
-        if filename.lower() in hint_lower:
+        lower = filename.lower()
+        if lower in hint_lower or lower.removesuffix(".exe") in hint_lower:
             score += 1000
         score += (4 - depth) * 100
         with contextlib.suppress(OSError):

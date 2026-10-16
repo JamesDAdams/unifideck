@@ -112,6 +112,6 @@ class EpicExeResolver:
                 hints.append(f"{title}.exe")
                 hints.append(f"{title.replace(' ', '_')}.exe")
                 hints.append(f"{title.replace(' ', '')}.exe")
-                hints.append(title.replace(' ', '_'))
-                hints.append(title.replace(' ', ''))
+                hints.append(title.replace(" ", "_"))
+                hints.append(title.replace(" ", ""))
         return self._find_exe(install_path, hints)
