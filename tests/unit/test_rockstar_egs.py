@@ -615,14 +615,10 @@ def test_launch_shim_sets_steamdeck_env(tmp_path):
     assert shim.is_file()
     content = shim.read_text(encoding="utf-8")
     assert "set SteamDeck=1" in content
-    assert "set VKD3D_FEATURE_LEVEL=12_0" in content
-    assert "set VKD3D_CONFIG=nodxr" in content
 
 
 def test_container_escape_always_forwards_steamdeck():
     from unifideck.launcher.proton.infrastructure.container_escape import _ALWAYS_FORWARD
     assert "SteamDeck" in _ALWAYS_FORWARD
-    assert "VKD3D_FEATURE_LEVEL" in _ALWAYS_FORWARD
-    assert "VKD3D_CONFIG" in _ALWAYS_FORWARD
 
 

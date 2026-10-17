@@ -337,10 +337,6 @@ def _apply_per_title_env(
     if rockstar_egs:
         _apply_rockstar_dll_overrides(env, umu_id)
         env["SteamDeck"] = "1"
-        env.setdefault("VKD3D_FEATURE_LEVEL", "12_0")
-        existing_cfg = env.get("VKD3D_CONFIG", "")
-        if "nodxr" not in existing_cfg:
-            env["VKD3D_CONFIG"] = f"{existing_cfg},nodxr" if existing_cfg else "nodxr"
     if ctx.store == "battlenet":
         _apply_battlenet_env(env)
     # Store-independent: keyed off the exe/id, not ctx.store, because the

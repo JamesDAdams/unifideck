@@ -75,8 +75,6 @@ _ALWAYS_FORWARD = frozenset({
     # left with the container's copy. Written by ``steam.window_env``.
     "STEAM_COMPAT_APP_ID",
     "SteamDeck",
-    "VKD3D_FEATURE_LEVEL",
-    "VKD3D_CONFIG",
 })
 
 

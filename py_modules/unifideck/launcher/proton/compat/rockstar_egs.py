@@ -65,88 +65,7 @@ LAUNCH_SHIM_NAME = "unifideck-rockstar-launch.bat"
 # title and silently does nothing), and ``%*`` forwards any game args
 # legendary appends. Single LF endings, matching the file that was verified
 # working on-device.
-_LAUNCH_SHIM_TEMPLATE = (
-    'set SteamDeck=1\r\n'
-    'set VKD3D_FEATURE_LEVEL=12_0\r\n'
-    'set VKD3D_CONFIG=nodxr\r\n'
-    'start "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\r\n'
-)
-_DEFAULT_GTA5_SETTINGS_XML = (
-    '<?xml version="1.0" encoding="UTF-8"?>\n'
-    '<Settings>\n'
-    '  <version value="27" />\n'
-    '  <configSource>SMC_AUTO</configSource>\n'
-    '  <graphics>\n'
-    '    <Tessellation value="0" />\n'
-    '    <LodScale value="0.000000" />\n'
-    '    <PedVarietyMultiplier value="0.000000" />\n'
-    '    <VehicleVarietyMultiplier value="0.000000" />\n'
-    '    <CityDensity value="0.000000" />\n'
-    '    <PedLodBias value="0.000000" />\n'
-    '    <VehicleLodBias value="0.000000" />\n'
-    '    <ShadowQuality value="0" />\n'
-    '    <ReflectionQuality value="0" />\n'
-    '    <ReflectionMSAA value="0" />\n'
-    '    <SSAO value="0" />\n'
-    '    <AnisotropicFiltering value="0" />\n'
-    '    <MSAA value="0" />\n'
-    '    <MSAAFragments value="0" />\n'
-    '    <MSAAQuality value="0" />\n'
-    '    <SamplingMode value="0" />\n'
-    '    <TextureQuality value="0" />\n'
-    '    <ParticleQuality value="0" />\n'
-    '    <WaterQuality value="0" />\n'
-    '    <GrassQuality value="0" />\n'
-    '    <ShaderQuality value="0" />\n'
-    '    <Shadow_SoftShadows value="0" />\n'
-    '    <UltraShadows_Enabled value="false" />\n'
-    '    <Shadow_ParticleShadows value="false" />\n'
-    '    <Shadow_Distance value="1.000000" />\n'
-    '    <Shadow_LongShadows value="false" />\n'
-    '    <Shadow_SplitZStart value="0.930000" />\n'
-    '    <Shadow_SplitZEnd value="0.890000" />\n'
-    '    <Shadow_aircraftExpWeight value="0.990000" />\n'
-    '    <Shadow_DisableScreenSizeCheck value="false" />\n'
-    '    <Reflection_MipBlur value="false" />\n'
-    '    <FXAA_Enabled value="true" />\n'
-    '    <TXAA_Enabled value="false" />\n'
-    '    <Lighting_FogVolumes value="false" />\n'
-    '    <Shader_SSA value="false" />\n'
-    '    <DX_Version value="2" />\n'
-    '    <CityDensity value="0.000000" />\n'
-    '    <PedVarietyMultiplier value="0.000000" />\n'
-    '    <VehicleVarietyMultiplier value="0.000000" />\n'
-    '    <PostFX value="0" />\n'
-    '    <DoF value="false" />\n'
-    '    <HdStreamingInFlight value="false" />\n'
-    '    <MaxLodScale value="0.000000" />\n'
-    '    <MotionBlurStrength value="0.000000" />\n'
-    '  </graphics>\n'
-    '  <system>\n'
-    '    <numBytesPerReplayBlock value="9000000" />\n'
-    '    <numReplayBlocks value="36" />\n'
-    '    <maxSizeOfStreamingReplay value="1024" />\n'
-    '    <maxFileStoreSize value="65536" />\n'
-    '  </system>\n'
-    '  <audio>\n'
-    '    <Audio3d value="false" />\n'
-    '  </audio>\n'
-    '  <video>\n'
-    '    <AdapterIndex value="0" />\n'
-    '    <OutputIndex value="0" />\n'
-    '    <ScreenWidth value="1280" />\n'
-    '    <ScreenHeight value="800" />\n'
-    '    <RefreshRate value="60" />\n'
-    '    <Windowed value="2" />\n'
-    '    <VSync value="0" />\n'
-    '    <Stereo value="0" />\n'
-    '    <Convergence value="0.000000" />\n'
-    '    <Separation value="0.000000" />\n'
-    '    <PauseOnFocusLoss value="0" />\n'
-    '    <AspectRatio value="0" />\n'
-    '  </video>\n'
-    '</Settings>\n'
-)
+_LAUNCH_SHIM_TEMPLATE = 'set SteamDeck=1\r\nstart "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\r\n'
 # Wine .reg block that registers the com.epicgames.launcher URL protocol
 # so the Rockstar launcher's Epic handoff resolves. Mirrors Heroic's
 # ``reg add HKEY_CLASSES_ROOT\com.epicgames.launcher /f``.
@@ -248,32 +167,28 @@ def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
                     rs_dirs.append(appdata_rs)
 
     for rs_dir in rs_dirs:
-        for folder_name in ("Launcher", "Social Club"):
-            target_dir = rs_dir / folder_name
-            if target_dir.is_dir():
-                shutil.rmtree(target_dir, ignore_errors=True)
-                logger.info("[rockstar_egs] wiped crash state dir: %s", target_dir)
-
-        # In game folders under Rockstar Games (e.g. GTAV Enhanced), delete safe-mode/crash settings
         try:
-            for game_subdir in rs_dir.iterdir():
-                if game_subdir.is_dir() and game_subdir.name not in ("Launcher", "Social Club"):
-                    for f_name in ("settings_rr.xml", "crash.log"):
-                        f = game_subdir / f_name
-                        if f.is_file():
-                            try:
-                                f.unlink()
-                                logger.info("[rockstar_egs] removed game crash artifact: %s", f)
-                            except OSError:
-                                pass
-                    # If settings.xml is missing, write clean default settings so D3D12 initialization succeeds
-                    settings_file = game_subdir / "settings.xml"
-                    if not settings_file.is_file():
+            for sub in rs_dir.iterdir():
+                if not sub.is_dir():
+                    continue
+                for f_name in ("settings_rr.xml", "crash.log", "crash.txt"):
+                    f = sub / f_name
+                    if f.is_file():
                         try:
-                            settings_file.write_text(_DEFAULT_GTA5_SETTINGS_XML, encoding="utf-8")
-                            logger.info("[rockstar_egs] wrote default settings.xml to %s", settings_file)
+                            f.unlink()
+                            logger.info("[rockstar_egs] removed crash artifact: %s", f)
                         except OSError:
                             pass
+                # Remove any stale legacy settings.xml written by older versions
+                settings_file = sub / "settings.xml"
+                if settings_file.is_file():
+                    try:
+                        txt = settings_file.read_text(encoding="utf-8", errors="replace")
+                        if '<DX_Version value="2" />' in txt and '<version value="27" />' in txt:
+                            settings_file.unlink()
+                            logger.info("[rockstar_egs] removed legacy settings.xml: %s", settings_file)
+                    except OSError:
+                        pass
         except OSError:
             pass
 
@@ -484,15 +399,11 @@ def _register_steamdeck_env(plan: ProtonLaunchPlan) -> None:
         user_reg = root / "user.reg"
         if user_reg.is_file():
             _inject_registry_value(user_reg, "Environment", "SteamDeck", "1")
-            _inject_registry_value(user_reg, "Environment", "VKD3D_FEATURE_LEVEL", "12_0")
-            _inject_registry_value(user_reg, "Environment", "VKD3D_CONFIG", "nodxr")
-            logger.info("[rockstar_egs] injected SteamDeck/VKD3D into %s", user_reg)
+            logger.info("[rockstar_egs] injected SteamDeck=1 into %s", user_reg)
 
         system_reg = root / "system.reg"
         if system_reg.is_file():
             sec = "System\\\\CurrentControlSet\\\\Control\\\\Session Manager\\\\Environment"
             _inject_registry_value(system_reg, sec, "SteamDeck", "1")
-            _inject_registry_value(system_reg, sec, "VKD3D_FEATURE_LEVEL", "12_0")
-            _inject_registry_value(system_reg, sec, "VKD3D_CONFIG", "nodxr")
-            logger.info("[rockstar_egs] injected SteamDeck/VKD3D into %s", system_reg)
+            logger.info("[rockstar_egs] injected SteamDeck=1 into %s", system_reg)
 

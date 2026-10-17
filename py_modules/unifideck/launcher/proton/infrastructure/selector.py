@@ -522,7 +522,7 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
         # 32-bit Windows games (which x86_64 GE-Proton cannot run on ARM64 due to
         # missing 32-bit Vulkan thunking). When umu cannot drive them (no protonfixes/),
         # the direct SLR runner in core.py handles execution via _v2-entry-point.
-        for cand_id in ("proton_experimental", "proton_11"):
+        for cand_id in ("proton_11", "proton_experimental"):
             cand = resolve_proton_path(cand_id)
             if cand and ge_installer.is_proton_install_complete(cand) and not ge_installer.is_x86_proton(cand):
                 tried.append(f"arm64-default:{cand_id}")
