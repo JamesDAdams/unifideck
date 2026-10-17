@@ -126,8 +126,8 @@ def apply_rockstar_egs_setup(plan: ProtonLaunchPlan) -> None:
         logger.exception("[rockstar_egs] SteamDeck env registration failed")
 
 
-def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
-    """Remove Rockstar Games Launcher crash state and logs to break 'exited unexpectedly' loop."""
+def _collect_rockstar_dirs(plan: ProtonLaunchPlan) -> list[Path]:
+    """Find all Rockstar Games directories across prefix drive_c and host paths."""
     prefix_root = normalize_prefix_root(plan.prefix_path)
     drive_c_candidates: list[Path] = []
     for cand in (prefix_root / "drive_c", prefix_root / "pfx" / "drive_c", resolve_drive_c(plan.prefix_path)):
@@ -153,7 +153,7 @@ def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
             continue
 
         for user_dir in user_dirs:
-            for doc_name in ("Documents", "documents", "My Documents"):
+            for doc_name in ("Documents", "documents", "My Documents", "Saved Games"):
                 rs_dir = user_dir / doc_name / "Rockstar Games"
                 if rs_dir.is_dir() and rs_dir not in rs_dirs:
                     rs_dirs.append(rs_dir)
@@ -165,30 +165,37 @@ def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
                 appdata_rs = user_dir.joinpath(*appdata_rel)
                 if appdata_rs.is_dir() and appdata_rs not in rs_dirs:
                     rs_dirs.append(appdata_rs)
+    return rs_dirs
 
-    for rs_dir in rs_dirs:
+
+def _purge_dir_crash_files(target_dir: Path) -> None:
+    """Purge settings_rr.xml, crash logs, and stale legacy settings.xml from a directory."""
+    for f_name in ("settings_rr.xml", "crash.log", "crash.txt"):
+        f = target_dir / f_name
+        if f.is_file():
+            try:
+                f.unlink()
+                logger.info("[rockstar_egs] removed crash artifact: %s", f)
+            except OSError:
+                pass
+    settings_file = target_dir / "settings.xml"
+    if settings_file.is_file():
         try:
-            for sub in rs_dir.iterdir():
-                if not sub.is_dir():
-                    continue
-                for f_name in ("settings_rr.xml", "crash.log", "crash.txt"):
-                    f = sub / f_name
-                    if f.is_file():
-                        try:
-                            f.unlink()
-                            logger.info("[rockstar_egs] removed crash artifact: %s", f)
-                        except OSError:
-                            pass
-                # Remove any stale legacy settings.xml written by older versions
-                settings_file = sub / "settings.xml"
-                if settings_file.is_file():
-                    try:
-                        txt = settings_file.read_text(encoding="utf-8", errors="replace")
-                        if '<DX_Version value="2" />' in txt and '<version value="27" />' in txt:
-                            settings_file.unlink()
-                            logger.info("[rockstar_egs] removed legacy settings.xml: %s", settings_file)
-                    except OSError:
-                        pass
+            txt = settings_file.read_text(encoding="utf-8", errors="replace")
+            if '<DX_Version value="2" />' in txt and '<version value="27" />' in txt:
+                settings_file.unlink()
+                logger.info("[rockstar_egs] removed legacy settings.xml: %s", settings_file)
+        except OSError:
+            pass
+
+
+def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
+    """Remove Rockstar Games Launcher crash state and logs to break 'exited unexpectedly' loop."""
+    for rs_dir in _collect_rockstar_dirs(plan):
+        try:
+            subdirs = [rs_dir] + [sub for sub in rs_dir.iterdir() if sub.is_dir()]
+            for target_dir in subdirs:
+                _purge_dir_crash_files(target_dir)
         except OSError:
             pass
 
@@ -198,7 +205,7 @@ def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:
     if install_dir is None:
         return
     cmd_file = install_dir / "commandline.txt"
-    needed_args = ["-nobattleye", "-onSteamDeck", "-scofflineonly", "-ignoreDifferentVideoCard"]
+    needed_args = ["-nobattleye", "-onSteamDeck", "-ignoreDifferentVideoCard"]
     existing = ""
     if cmd_file.is_file():
         try:
@@ -207,6 +214,13 @@ def _write_commandline_txt(plan: ProtonLaunchPlan) -> None:
             existing = ""
     tokens = [t.strip() for t in existing.split() if t.strip()]
     modified = False
+
+    # Purge any stale -scofflineonly which blocks online Social Club entitlement check
+    initial_len = len(tokens)
+    tokens = [t for t in tokens if t.lower() != "-scofflineonly"]
+    if len(tokens) != initial_len:
+        modified = True
+
     for arg in needed_args:
         if not any(arg.lower() == t.lower() for t in tokens):
             tokens.append(arg)
@@ -276,7 +290,6 @@ def _copy_fake_launcher(plan: ProtonLaunchPlan) -> None:
     the game's own directory, so the stub must sit next to the game exe (the
     install/work dir), not in the prefix.
     """
-    import shutil
     fake = plan.context.plugin_dir / "bin" / _FAKE_LAUNCHER_NAME
     if not fake.is_file():
         logger.warning(

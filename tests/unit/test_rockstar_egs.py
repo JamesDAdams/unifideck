@@ -573,7 +573,7 @@ def test_setup_cleans_rockstar_launcher_crash_state(tmp_path):
     assert (save_dir / "SGTA50000").read_text(encoding="utf-8") == "real save"
 
 
-def test_setup_writes_commandline_txt_with_crlf_and_offline(tmp_path):
+def test_setup_writes_commandline_txt_with_crlf_and_no_scofflineonly(tmp_path):
     install = tmp_path / "install"
     install.mkdir()
     plugin = tmp_path / "plugin"
@@ -594,7 +594,32 @@ def test_setup_writes_commandline_txt_with_crlf_and_offline(tmp_path):
     content = raw.decode("utf-8")
     assert "-nobattleye" in content
     assert "-onSteamDeck" in content
-    assert "-scofflineonly" in content
+    assert "-ignoreDifferentVideoCard" in content
+    assert "-scofflineonly" not in content
+
+
+def test_setup_purges_scofflineonly_from_existing_commandline(tmp_path):
+    install = tmp_path / "install"
+    install.mkdir()
+    cmd_file = install / "commandline.txt"
+    cmd_file.write_text("-nobattleye -onSteamDeck -scofflineonly\r\n", encoding="utf-8")
+
+    plugin = tmp_path / "plugin"
+    (plugin / "bin").mkdir(parents=True)
+    (plugin / "bin" / "EpicGamesLauncher.exe").write_bytes(b"MZ-fake")
+
+    prefix = tmp_path / "prefix"
+    drive_c = prefix / "pfx" / "drive_c"
+    drive_c.mkdir(parents=True)
+
+    plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
+    rockstar_egs.apply_rockstar_egs_setup(plan)
+
+    content = cmd_file.read_text(encoding="utf-8")
+    assert "-scofflineonly" not in content
+    assert "-nobattleye" in content
+    assert "-onSteamDeck" in content
+    assert "-ignoreDifferentVideoCard" in content
 
 
 def test_launch_shim_sets_steamdeck_env(tmp_path):
