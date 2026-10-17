@@ -454,3 +454,39 @@ def test_default_latest_ge_prefers_ge_on_x86_64(
     assert path == ge_dir / "proton"
     assert "latest-ge-cached:GE-Proton11-7" in tried
 
+
+def test_default_latest_ge_prefers_experimental_over_proton11_on_arm64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from unifideck.core import arch
+
+    monkeypatch.setattr(arch, "is_arm", lambda: True)
+
+    common = tmp_path / "steamapps" / "common"
+    exp = common / "Proton Experimental (ARM64)"
+    (exp / "files" / "bin-arm64").mkdir(parents=True)
+    (exp / "proton").write_text("#!/bin/sh\n")
+    (exp / "proton").chmod(0o755)
+    (exp / "files" / "bin-arm64" / "wine").write_text("")
+    (exp / "version").write_text("1.0\n")
+    (exp / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    p11 = common / "Proton 11.0 (ARM64)"
+    (p11 / "files" / "bin-arm64").mkdir(parents=True)
+    (p11 / "proton").write_text("#!/bin/sh\n")
+    (p11 / "proton").chmod(0o755)
+    (p11 / "files" / "bin-arm64" / "wine").write_text("")
+    (p11 / "version").write_text("1.0\n")
+    (p11 / "toolmanifest.vdf").write_text('"manifest"\n{\n  "commandline" "/proton run"\n}\n')
+
+    monkeypatch.setattr(S, "STEAM_LIBRARY_ROOTS", [str(common)])
+    monkeypatch.setattr(S, "_compat_tool_roots", list)
+    monkeypatch.setattr(S, "_discovered_library_commons", list)
+
+    tried: list[str] = []
+    path, tool_id = S._default_latest_ge(tried)
+
+    assert tool_id == "proton_experimental"
+    assert path == exp / "proton"
+    assert "arm64-default:proton_experimental" in tried
+

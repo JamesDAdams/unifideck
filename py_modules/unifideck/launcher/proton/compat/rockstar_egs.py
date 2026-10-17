@@ -65,7 +65,7 @@ LAUNCH_SHIM_NAME = "unifideck-rockstar-launch.bat"
 # title and silently does nothing), and ``%*`` forwards any game args
 # legendary appends. Single LF endings, matching the file that was verified
 # working on-device.
-_LAUNCH_SHIM_TEMPLATE = 'set SteamDeck=1\r\nstart "" {launcher} {play_exe} -nobattleye -onSteamDeck %*\r\n'
+_LAUNCH_SHIM_TEMPLATE = 'set SteamDeck=1\r\nstart "" {launcher} {play_exe} %*\r\n'
 # Wine .reg block that registers the com.epicgames.launcher URL protocol
 # so the Rockstar launcher's Epic handoff resolves. Mirrors Heroic's
 # ``reg add HKEY_CLASSES_ROOT\com.epicgames.launcher /f``.
@@ -168,34 +168,27 @@ def _collect_rockstar_dirs(plan: ProtonLaunchPlan) -> list[Path]:
     return rs_dirs
 
 
-def _purge_dir_crash_files(target_dir: Path) -> None:
-    """Purge settings_rr.xml, crash logs, and stale legacy settings.xml from a directory."""
-    for f_name in ("settings_rr.xml", "crash.log", "crash.txt"):
-        f = target_dir / f_name
-        if f.is_file():
-            try:
-                f.unlink()
-                logger.info("[rockstar_egs] removed crash artifact: %s", f)
-            except OSError:
-                pass
-    settings_file = target_dir / "settings.xml"
-    if settings_file.is_file():
-        try:
-            txt = settings_file.read_text(encoding="utf-8", errors="replace")
-            if '<DX_Version value="2" />' in txt and '<version value="27" />' in txt:
-                settings_file.unlink()
-                logger.info("[rockstar_egs] removed legacy settings.xml: %s", settings_file)
-        except OSError:
-            pass
-
-
 def _clean_rockstar_crash_state(plan: ProtonLaunchPlan) -> None:
     """Remove Rockstar Games Launcher crash state and logs to break 'exited unexpectedly' loop."""
     for rs_dir in _collect_rockstar_dirs(plan):
         try:
-            subdirs = [rs_dir] + [sub for sub in rs_dir.iterdir() if sub.is_dir()]
-            for target_dir in subdirs:
-                _purge_dir_crash_files(target_dir)
+            for p in rs_dir.rglob("*"):
+                if not p.is_file():
+                    continue
+                if p.name in ("settings_rr.xml", "crash.log", "crash.txt"):
+                    try:
+                        p.unlink()
+                        logger.info("[rockstar_egs] removed crash artifact: %s", p)
+                    except OSError:
+                        pass
+                elif p.name == "settings.xml":
+                    try:
+                        txt = p.read_text(encoding="utf-8", errors="replace")
+                        if '<DX_Version value="2" />' in txt and '<version value="27" />' in txt:
+                            p.unlink()
+                            logger.info("[rockstar_egs] removed legacy settings.xml: %s", p)
+                    except OSError:
+                        pass
         except OSError:
             pass
 

@@ -318,8 +318,11 @@ def test_setup_writes_launch_shim_matching_proven_fix(tmp_path):
 
     shim = install / rockstar_egs.LAUNCH_SHIM_NAME
     assert shim.is_file()
-    assert "set SteamDeck=1" in shim.read_text()
-    assert "PlayGTAV.exe" in shim.read_text()
+    content = shim.read_text()
+    assert "set SteamDeck=1" in content
+    assert "PlayGTAV.exe" in content
+    assert "-nobattleye" not in content
+    assert "-onSteamDeck" not in content
 
 
 def test_setup_shim_names_rdr2_play_exe(tmp_path):
@@ -564,12 +567,15 @@ def test_setup_cleans_rockstar_launcher_crash_state(tmp_path):
     save_dir = drive_c / "users" / "steamuser" / "Documents" / "Rockstar Games" / "GTAV Enhanced" / "Profiles" / "ABC"
     save_dir.mkdir(parents=True)
     (save_dir / "SGTA50000").write_text("real save", encoding="utf-8")
+    nested_crash = save_dir / "settings_rr.xml"
+    nested_crash.write_text("<crash/>", encoding="utf-8")
 
     plan = _setup_plan(tmp_path, "8769e24080ea413b8ebca3f1b8c50951", install_dir=install, plugin_dir=plugin)
     rockstar_egs.apply_rockstar_egs_setup(plan)
 
     assert not (launcher_docs / "crash.log").exists()
     assert not (launcher_docs / "settings_rr.xml").exists()
+    assert not nested_crash.exists()
     assert (save_dir / "SGTA50000").read_text(encoding="utf-8") == "real save"
 
 

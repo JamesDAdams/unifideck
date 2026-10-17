@@ -517,12 +517,12 @@ def _default_latest_ge(tried: list[str]) -> tuple[Path, str]:
     # through to the GE tiers instead of handing umu a Proton it cannot run.
     # (Field: 0.7.6, gog:1909524379 Call of Juarez — game never launched.)
     if is_arm():
-        # Prefer installed native Proton 11.0 (ARM64) or Proton Experimental (ARM64)
+        # Prefer installed native Proton Experimental (ARM64) or Proton 11.0 (ARM64)
         # on ARM64 hosts. These builds use Wine's modern WoW64 architecture to run
         # 32-bit Windows games (which x86_64 GE-Proton cannot run on ARM64 due to
         # missing 32-bit Vulkan thunking). When umu cannot drive them (no protonfixes/),
         # the direct SLR runner in core.py handles execution via _v2-entry-point.
-        for cand_id in ("proton_11", "proton_experimental"):
+        for cand_id in ("proton_experimental", "proton_11"):
             cand = resolve_proton_path(cand_id)
             if cand and ge_installer.is_proton_install_complete(cand) and not ge_installer.is_x86_proton(cand):
                 tried.append(f"arm64-default:{cand_id}")
